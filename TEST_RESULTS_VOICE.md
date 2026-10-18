@@ -188,6 +188,77 @@ This document contains manual testing procedures, test cases, and verification e
 
 ---
 
+### 16. Gaze-Based Text-Range Selection for Copy and Cut
+
+| Step | Action | Expected Behavior | Observed Result | Status |
+|------|--------|-------------------|-----------------|--------|
+| 16.1 | Look at the start of a paragraph on a web page and say "Sanchalan, start copy". | Enters `selectionPending` state. Pinned `📍 Start` marker appears at gaze point. Floating banner shows "Copy selection started — look at the end text and say 'Sanchalan, end copy'." Live `👁️ End` marker tracks gaze. 15s timer starts. | Banner and markers displayed; live coordinates tracked from existing gaze system. | PASS |
+| 16.2 | Move gaze pointer to the end of the paragraph and say "Sanchalan, end copy". | Nearest caret position resolved via `caretPositionFromPoint` / `caretRangeFromPoint`. DOM `Range` constructed, applied to `window.getSelection()`, text copied to clipboard. HUD shows "✓ Copied text (N chars)". | Text range accurately selected and copied to clipboard. | PASS |
+| 16.3 | Test backward selection: Look at end of sentence, say "start copy", look backward to the start of sentence, say "end copy". | Normalized range created with correct start and end offsets. Selection is identical to forward selection. | Backward gaze range normalized and copied without inversion error. | PASS |
+| 16.4 | Test in `<input>` and `<textarea>` fields: Look at field text, say "start copy", look to end, say "end copy". | Element focus maintained, `setSelectionRange(start, end)` applied, field substring copied to clipboard. | Field selection works accurately. | PASS |
+| 16.5 | Test gaze selection in `contenteditable`: Start copy, move gaze, end copy. | Contenteditable range created and selected; formatted HTML/text preserved. | Contenteditable selection works. | PASS |
+| 16.6 | Test 15-second timeout: Say "start copy", remain idle for 15 seconds. | Selection automatically cancels after 15s. Overlay updates to "Selection timed out after 15s." All markers cleared safely. | Timeout timer cleanly resets state. | PASS |
+| 16.7 | Test cancellation: Say "start copy", then say "Sanchalan, cancel selection" (or "cancel copy", "never mind"). | Selection cancels immediately, removing markers and banners. State returns to `idle`. | Cancel variations work immediately. | PASS |
+| 16.8 | Test tab scoping: Say "start copy", then switch browser tabs or reload page. | Selection state cancelled on old tab; markers removed. New tab starts clean. | Tab scoped; no leaked state. | PASS |
+| 16.9 | Test Cut safety on static page text: Say "start cut", look to end, say "end cut". | Reports "Cannot cut ordinary static page text. Text can only be copied." Ordinary text is never deleted. | Static text protected from deletion. | PASS |
+| 16.10 | Test Cut in editable field: Look at text inside editable `<textarea>`, say "start cut", move gaze, say "end cut". | Measures text length. HUD prompts: `✂️ Cut N characters? Say "confirm cut" or "cancel cut"`. Enters waiting confirmation state. Text not deleted yet. | Safe confirmation prompt triggered. | PASS |
+| 16.11 | Say "confirm cut". | Text removed from editable field, copied to clipboard. HUD confirms `✓ Cut N characters`. | Editable text cleanly cut to clipboard. | PASS |
+| 16.12 | Repeat cut test, then say "cancel cut". | Cut cancelled; no text removed. | Cancellation preserves content. | PASS |
+| 16.13 | Check conflict avoidance: While selection pending, perform edge scroll or mouth gesture. | Edge scrolling continues to scroll viewport; link dwell tooltips suppressed so they don't cover text. | Zero interaction conflicts. | PASS |
+
+---
+
+### 17. WhatsApp Web Navigation
+
+| Step | Action | Expected Behavior | Observed Result | Status |
+|------|--------|-------------------|-----------------|--------|
+| 17.1 | Say "Sanchalan, open WhatsApp" (or "open WhatsApp Web", "launch WhatsApp", "go to WhatsApp", "open my WhatsApp"). | Creates a new active tab with `https://web.whatsapp.com/`. Side panel displays "Opened WhatsApp Web". Does not attempt to bypass login or QR-code. | WhatsApp Web tab opened. | PASS |
+| 17.2 | With WhatsApp Web tab already open in current window, navigate to another tab and say "Sanchalan, open WhatsApp". | Activates existing WhatsApp Web tab without creating a duplicate tab. Side panel displays "Opened WhatsApp Web (switched to existing tab)". | Duplicate tab prevented; existing tab activated. | PASS |
+
+---
+
+### 18. General Web Search & Provider Flexibility
+
+| Step | Action | Expected Behavior | Observed Result | Status |
+|------|--------|-------------------|-----------------|--------|
+| 18.1 | Say "Sanchalan, search for accessible web design". | Opens new active tab with `https://www.google.com/search?q=accessible%20web%20design`. Side panel shows "Searching the web". | Google search loaded with URL-encoded query. | PASS |
+| 18.2 | Say 'Sanchalan, search "best exercises for wrist pain"'. | Preserves double quotes in query and URL. | Quoted terms preserved in search. | PASS |
+| 18.3 | Say "Sanchalan, google weather in Bengaluru" / "find accessible fonts online" / "look up quantum computing". | All search phrasing variants parsed and opened in search tab. | All search phrases recognized. | PASS |
+| 18.4 | Say "Sanchalan, search for" (empty query). | Rejects empty query: `Please provide a search term. Example: "Sanchalan, search for accessible web design".` Does not open blank search tab. | Helpful prompt displayed. | PASS |
+| 18.5 | Say "Sanchalan, search in youtube lo-fi music". | YouTube search takes strict priority over general web search; does not confuse with Google search. | Handled by YouTube command handler. | PASS |
+| 18.6 | In side panel, select "Bing" as Web Search Provider. Say "Sanchalan, search for web accessibility". | Opens new active tab with `https://www.bing.com/search?q=web%20accessibility`. | Search provider configurable in settings. | PASS |
+| 18.7 | In side panel, select "DuckDuckGo". Say "Sanchalan, search for privacy browsing". | Opens new active tab with `https://duckduckgo.com/?q=privacy%20browsing`. | DuckDuckGo search loaded. | PASS |
+
+---
+
+### 19. "Switch Time" & ASR Tab-Switching Aliases
+
+| Step | Action | Expected Behavior | Observed Result | Status |
+|------|--------|-------------------|-----------------|--------|
+| 19.1 | Say "Sanchalan, switch time 4". | Recognized as `switch to tab 4`. Activates tab #4 in current window. | Tab 4 activated. | PASS |
+| 19.2 | Say "Sanchalan, switch time YouTube". | Recognized as `switch to tab "youtube"`. Confident match activates YouTube tab. | YouTube tab activated. | PASS |
+| 19.3 | Say "Sanchalan, go to time GitHub". | Recognized as `switch to tab "github"`. Matches GitHub tab. | GitHub tab activated. | PASS |
+| 19.4 | Say "Sanchalan, change tab 2". | Recognized as `switch to tab 2`. Activates tab #2. | Tab 2 activated. | PASS |
+| 19.5 | Say "Sanchalan, change time New York Times". | Normalizes prefix structure only. Does NOT replace inner word "time" in "New York Times". Matches "The New York Times" tab title. | Tab matched without query title corruption. | PASS |
+
+---
+
+### 20. Side-Panel Live Voice-Action Statuses
+
+| Step | Action | Expected Behavior | Observed Result | Status |
+|------|--------|-------------------|-----------------|--------|
+| 20.1 | Check side panel when voice is enabled and idle. | State pill displays "Idle" (or "Listening"). Status text shows `Listening for "sanchalan"`. | Correct idle status. | PASS |
+| 20.2 | Say "sanchalan". | State pill displays "Listening for command", status dot pulses amber. | Armed state reflected. | PASS |
+| 20.3 | Say "sanchalan, start copy". | State pill displays "Selection started", status text guides user to look at end text. | Selection started status. | PASS |
+| 20.4 | Say "sanchalan, end copy". | State pill displays "Copied text", status text reports characters copied. | Copied text status. | PASS |
+| 20.5 | Say "sanchalan, start cut", then "end cut" on editable text. | State pill displays "Waiting for cut confirmation", status text prompts for confirmation. | Waiting confirmation status. | PASS |
+| 20.6 | Say "sanchalan, confirm cut". | State pill displays "Selection completed", status text confirms cut. | Selection completed status. | PASS |
+| 20.7 | Say "sanchalan, open whatsapp". | State pill displays "Opened WhatsApp Web". | Opened WhatsApp status. | PASS |
+| 20.8 | Say "sanchalan, search for accessible web design". | State pill displays "Searching the web". | Searching the web status. | PASS |
+| 20.9 | Say "sanchalan, search for" (empty). | State pill displays "Error / retry required". | Error / retry status. | PASS |
+
+---
+
 ## Conclusion
-The enhanced SANCHALAN Voice Subsystem provides tolerant, privacy-preserving speech recognition, wake-word-free stop dictation, partial tab-title ranked matching, voice and gesture clipboard operations with safety confirmation, YouTube navigation and URL-based search, and a first-time user cheat sheet with real-time recognition diagnostics.
+The enhanced SANCHALAN Manifest V3 Chrome extension now delivers complete hands-free text selection (copy and cut) driven by the existing gaze/head pointer system with visual overlays and safe cut confirmation, instant WhatsApp Web launching with duplicate prevention, multi-engine general web search preserving quotes and query terms, ASR-tolerant "switch time" tab switching aliases, and full side-panel discoverability with live voice-action statuses. All existing voice commands, voice typing, AI summaries, head tracking, mouth clicks, and dwell interactions remain fully functional.
 

@@ -233,6 +233,119 @@ test('LocalWhisperProvider requires local companion endpoint and rejects missing
   assert.strictEqual(configured.isConfigured(), true);
 });
 
+console.log('\n--- Test Suite 10: "Switch Time" & Tab Switching Aliases ---');
+test('Parses "switch time <num>" and aliases', () => {
+  const cmd1 = parseVoiceCommand('switch time 4');
+  assert.strictEqual(cmd1.type, 'SWITCH_TAB_INDEX');
+  assert.strictEqual(cmd1.tabIndex, 4);
+
+  const cmd2 = parseVoiceCommand('change tab 2');
+  assert.strictEqual(cmd2.type, 'SWITCH_TAB_INDEX');
+  assert.strictEqual(cmd2.tabIndex, 2);
+
+  const cmd3 = parseVoiceCommand('change time 3');
+  assert.strictEqual(cmd3.type, 'SWITCH_TAB_INDEX');
+  assert.strictEqual(cmd3.tabIndex, 3);
+
+  const cmd4 = parseVoiceCommand('switch to time 5');
+  assert.strictEqual(cmd4.type, 'SWITCH_TAB_INDEX');
+  assert.strictEqual(cmd4.tabIndex, 5);
+});
+
+test('Parses "switch time <title>" and aliases without corrupting inner word time', () => {
+  const cmd1 = parseVoiceCommand('switch time YouTube');
+  assert.strictEqual(cmd1.type, 'SWITCH_TAB_TITLE');
+  assert.strictEqual(cmd1.query, 'youtube');
+
+  const cmd2 = parseVoiceCommand('go to time GitHub');
+  assert.strictEqual(cmd2.type, 'SWITCH_TAB_TITLE');
+  assert.strictEqual(cmd2.query, 'github');
+
+  const cmd3 = parseVoiceCommand('change time New York Times');
+  assert.strictEqual(cmd3.type, 'SWITCH_TAB_TITLE');
+  assert.strictEqual(cmd3.query, 'new york times');
+});
+
+console.log('\n--- Test Suite 11: WhatsApp Web Navigation ---');
+test('Parses WhatsApp Web launch phrases', () => {
+  assert.strictEqual(parseVoiceCommand('open whatsapp').type, 'OPEN_WHATSAPP');
+  assert.strictEqual(parseVoiceCommand('open whatsapp web').type, 'OPEN_WHATSAPP');
+  assert.strictEqual(parseVoiceCommand('launch whatsapp').type, 'OPEN_WHATSAPP');
+  assert.strictEqual(parseVoiceCommand('go to whatsapp').type, 'OPEN_WHATSAPP');
+  assert.strictEqual(parseVoiceCommand('open my whatsapp').type, 'OPEN_WHATSAPP');
+});
+
+console.log('\n--- Test Suite 12: General Web Search & Priority ---');
+test('Parses general web search queries with quotes and multiword terms', () => {
+  const cmd1 = parseVoiceCommand('search for accessible web design');
+  assert.strictEqual(cmd1.type, 'WEB_SEARCH');
+  assert.strictEqual(cmd1.query, 'accessible web design');
+
+  const cmd2 = parseVoiceCommand('search "best exercises for wrist pain"');
+  assert.strictEqual(cmd2.type, 'WEB_SEARCH');
+  assert.strictEqual(cmd2.query, '"best exercises for wrist pain"');
+
+  const cmd3 = parseVoiceCommand('google weather in Bengaluru');
+  assert.strictEqual(cmd3.type, 'WEB_SEARCH');
+  assert.strictEqual(cmd3.query, 'weather in bengaluru');
+
+  const cmd4 = parseVoiceCommand('find accessible fonts online');
+  assert.strictEqual(cmd4.type, 'WEB_SEARCH');
+  assert.strictEqual(cmd4.query, 'accessible fonts');
+
+  const cmd5 = parseVoiceCommand('look up quantum computing');
+  assert.strictEqual(cmd5.type, 'WEB_SEARCH');
+  assert.strictEqual(cmd5.query, 'quantum computing');
+});
+
+test('Rejects empty web search queries', () => {
+  const cmd1 = parseVoiceCommand('search for');
+  assert.strictEqual(cmd1.type, 'WEB_SEARCH');
+  assert.strictEqual(cmd1.error, 'EMPTY_QUERY');
+
+  const cmd2 = parseVoiceCommand('google');
+  assert.strictEqual(cmd2.type, 'WEB_SEARCH');
+  assert.strictEqual(cmd2.error, 'EMPTY_QUERY');
+});
+
+test('Ensures YouTube search takes strict priority over general search', () => {
+  const ytCmd = parseVoiceCommand('search in youtube accessible web design');
+  assert.strictEqual(ytCmd.type, 'SEARCH_YOUTUBE');
+  assert.notStrictEqual(ytCmd.type, 'WEB_SEARCH');
+});
+
+console.log('\n--- Test Suite 13: Gaze-Based Text Selection ---');
+test('Parses gaze copy start and end variations', () => {
+  assert.strictEqual(parseVoiceCommand('start copy').type, 'GAZE_START_COPY');
+  assert.strictEqual(parseVoiceCommand('start copying').type, 'GAZE_START_COPY');
+  assert.strictEqual(parseVoiceCommand('begin copy').type, 'GAZE_START_COPY');
+  assert.strictEqual(parseVoiceCommand('copy from here').type, 'GAZE_START_COPY');
+  assert.strictEqual(parseVoiceCommand('mark start for copy').type, 'GAZE_START_COPY');
+
+  assert.strictEqual(parseVoiceCommand('end copy').type, 'GAZE_END_COPY');
+  assert.strictEqual(parseVoiceCommand('finish copy').type, 'GAZE_END_COPY');
+  assert.strictEqual(parseVoiceCommand('copy until here').type, 'GAZE_END_COPY');
+  assert.strictEqual(parseVoiceCommand('mark end for copy').type, 'GAZE_END_COPY');
+});
+
+test('Parses gaze cut start, end, confirm, and cancel variations', () => {
+  assert.strictEqual(parseVoiceCommand('start cut').type, 'GAZE_START_CUT');
+  assert.strictEqual(parseVoiceCommand('start cutting').type, 'GAZE_START_CUT');
+  assert.strictEqual(parseVoiceCommand('begin cut').type, 'GAZE_START_CUT');
+  assert.strictEqual(parseVoiceCommand('cut from here').type, 'GAZE_START_CUT');
+  assert.strictEqual(parseVoiceCommand('mark start for cut').type, 'GAZE_START_CUT');
+
+  assert.strictEqual(parseVoiceCommand('end cut').type, 'GAZE_END_CUT');
+  assert.strictEqual(parseVoiceCommand('finish cut').type, 'GAZE_END_CUT');
+  assert.strictEqual(parseVoiceCommand('cut until here').type, 'GAZE_END_CUT');
+  assert.strictEqual(parseVoiceCommand('mark end for cut').type, 'GAZE_END_CUT');
+
+  assert.strictEqual(parseVoiceCommand('confirm cut').type, 'CONFIRM_CUT');
+  assert.strictEqual(parseVoiceCommand('cancel cut').type, 'CANCEL_CUT');
+  assert.strictEqual(parseVoiceCommand('cancel selection').type, 'GAZE_CANCEL_SELECTION');
+  assert.strictEqual(parseVoiceCommand('cancel copy').type, 'GAZE_CANCEL_SELECTION');
+});
+
 console.log(`\n========================================`);
 console.log(`Results: ${passCount} Passed, ${failCount} Failed`);
 console.log(`========================================\n`);

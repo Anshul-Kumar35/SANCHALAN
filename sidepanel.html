@@ -136,13 +136,38 @@
           </div>
 
           <div class="command-group">
-            <span class="group-title">Navigation</span>
+            <span class="group-title">Tabs & Navigation</span>
             <ul class="command-list">
               <li><code>"Sanchalan, next tab"</code></li>
               <li><code>"Sanchalan, previous tab"</code></li>
               <li><code>"Sanchalan, switch to tab 3"</code></li>
-              <li><code>"Sanchalan, switch to tab GitHub"</code></li>
+              <li><code>"Sanchalan, switch tab GitHub"</code></li>
+              <li><code>"Sanchalan, switch time YouTube"</code></li>
               <li><code>"Sanchalan, choose 1"</code> (for ambiguous matches)</li>
+            </ul>
+          </div>
+
+          <div class="command-group">
+            <span class="group-title">Gaze Text Selection (Copy & Cut)</span>
+            <ul class="command-list">
+              <li><code>"Sanchalan, start copy"</code></li>
+              <li style="list-style:none; padding-left:12px; font-size:11px; opacity:0.85;">↳ Move gaze to the ending text</li>
+              <li><code>"Sanchalan, end copy"</code></li>
+              <li><code>"Sanchalan, start cut"</code></li>
+              <li style="list-style:none; padding-left:12px; font-size:11px; opacity:0.85;">↳ Move gaze to the ending text</li>
+              <li><code>"Sanchalan, end cut"</code></li>
+              <li><code>"Sanchalan, confirm cut"</code></li>
+              <li><code>"Sanchalan, cancel selection"</code></li>
+            </ul>
+          </div>
+
+          <div class="command-group">
+            <span class="group-title">Web Navigation & Search</span>
+            <ul class="command-list">
+              <li><code>"Sanchalan, open WhatsApp"</code></li>
+              <li><code>"Sanchalan, search for <query>"</code></li>
+              <li><code>"Sanchalan, open YouTube"</code></li>
+              <li><code>"Sanchalan, search in YouTube <query>"</code></li>
             </ul>
           </div>
 
@@ -166,21 +191,13 @@
           </div>
 
           <div class="command-group">
-            <span class="group-title">Editing</span>
+            <span class="group-title">Editing & Clipboard</span>
             <ul class="command-list">
               <li><code>"Sanchalan, copy selected text"</code></li>
               <li><code>"Sanchalan, cut selected text"</code> (asks confirmation)</li>
               <li><code>"Sanchalan, paste"</code></li>
               <li><code>"Sanchalan, select all"</code></li>
               <li><code>"Sanchalan, undo"</code> / <code>"redo"</code></li>
-            </ul>
-          </div>
-
-          <div class="command-group">
-            <span class="group-title">YouTube</span>
-            <ul class="command-list">
-              <li><code>"Sanchalan, open YouTube"</code></li>
-              <li><code>"Sanchalan, search in YouTube lo-fi music"</code></li>
             </ul>
           </div>
         </div>
@@ -213,6 +230,17 @@
             <span class="toggle-label">Mouth Gesture Arming</span>
           </label>
           <p class="help-text">Hold mouth open for 900ms to arm commands without wake phrase</p>
+        </div>
+
+        <!-- Web Search Provider Setting -->
+        <div class="setting-group">
+          <label class="setting-label" for="search-provider">Web Search Provider:</label>
+          <select id="search-provider" class="setting-select">
+            <option value="google" selected>Google (Default)</option>
+            <option value="bing">Bing</option>
+            <option value="duckduckgo">DuckDuckGo</option>
+          </select>
+          <p class="help-text">Search engine used for "search for &lt;query&gt;" commands</p>
         </div>
 
         <!-- Optional Deliberate Clipboard Gestures -->

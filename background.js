@@ -2063,6 +2063,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ armed: true });
     return true;
   }
+
+  if (message.type === 'VOICE_SELECTION_TIMEOUT') {
+    if (activeGazeSelection) {
+      activeGazeSelection = null;
+    }
+    lastIntent = 'Selection Timed Out';
+    setVoiceState('idle', { message: 'Selection timed out after 15s.', lastHeard, lastIntent });
+    sendResponse({ success: true });
+    return true;
+  }
 });
 
 // ========================================
@@ -2072,7 +2082,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 const OFFSCREEN_DOCUMENT_PATH = 'voice/offscreen.html';
 
 // Single source of truth for voice state:
-// 'disabled' | 'idle' | 'armed' | 'dictating' | 'processing-command' | 'error'
+// 'disabled' | 'idle' | 'armed' | 'dictating' | 'processing-command' | 'selection-pending' | 'waiting-cut-confirmation' | 'error'
 let voiceState = 'disabled';
 let lastTranscript = '';
 let lastHeard = '';
@@ -2081,11 +2091,58 @@ let lastCommandResult = null;
 let pendingTabCandidates = [];
 let pendingCloseConfirmation = null;
 let pendingCutConfirmation = null;
+let activeGazeSelection = null; // { action: 'copy'|'cut', tabId: number, startTime: number, timer: any }
 let extensionClipboard = '';
 let lastUtteranceText = '';
 let lastUtteranceTimestamp = 0;
 const ROLLING_WINDOW_MS = 3500;
 let voiceCommandTimer = null;
+
+async function cancelGazeSelection(tabId) {
+  if (activeGazeSelection) {
+    clearTimeout(activeGazeSelection.timer);
+    const target = tabId || activeGazeSelection.tabId;
+    activeGazeSelection = null;
+    if (target) {
+      await chrome.tabs.sendMessage(target, { type: 'GAZE_SELECTION_CANCEL' }).catch(() => {});
+    }
+  }
+}
+
+// Scope selection state and cut confirmation to a single tab
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  if (activeGazeSelection && activeGazeSelection.tabId !== tabId) {
+    const oldTabId = activeGazeSelection.tabId;
+    cancelGazeSelection(oldTabId);
+    setVoiceState('idle', { message: 'Selection cancelled due to tab switch.' });
+  }
+  if (pendingCutConfirmation && pendingCutConfirmation.tabId !== tabId) {
+    pendingCutConfirmation = null;
+    setVoiceState('idle', { message: 'Cut cancelled due to tab switch.' });
+  }
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === 'loading') {
+    if (activeGazeSelection && activeGazeSelection.tabId === tabId) {
+      cancelGazeSelection(tabId);
+      setVoiceState('idle', { message: 'Selection cancelled due to page reload.' });
+    }
+    if (pendingCutConfirmation && pendingCutConfirmation.tabId === tabId) {
+      pendingCutConfirmation = null;
+      setVoiceState('idle', { message: 'Cut cancelled due to page reload.' });
+    }
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (activeGazeSelection && activeGazeSelection.tabId === tabId) {
+    activeGazeSelection = null;
+  }
+  if (pendingCutConfirmation && pendingCutConfirmation.tabId === tabId) {
+    pendingCutConfirmation = null;
+  }
+});
 
 // Initialize session clipboard fallback
 try {
@@ -2233,6 +2290,9 @@ async function stopVoiceSubsystem() {
   pendingCloseConfirmation = null;
   pendingCutConfirmation = null;
   pendingTabCandidates = [];
+  if (activeGazeSelection) {
+    cancelGazeSelection(activeGazeSelection.tabId);
+  }
 
   try {
     await chrome.runtime.sendMessage({
@@ -2353,6 +2413,39 @@ async function handleVoiceFinalTranscript(transcript) {
   if (lastUtteranceText && (now - lastUtteranceTimestamp) < ROLLING_WINDOW_MS) {
     if (lastUtteranceText === 'sanchalan' && !transcript.toLowerCase().includes('sanchalan')) {
       utteranceToProcess = `sanchalan ${transcript}`;
+    }
+  }
+
+  // State: SELECTION_PENDING
+  if (voiceState === 'selection-pending') {
+    const { hasWakePhrase, remainder } = parser.extractWakePhrase(utteranceToProcess, voiceSettings.voiceWakePhrase);
+    const commandText = hasWakePhrase && remainder ? remainder : utteranceToProcess;
+    const parsedCmd = parser.parseVoiceCommand(commandText);
+
+    if (parsedCmd) {
+      if (parsedCmd.type === 'GAZE_END_COPY' || parsedCmd.type === 'GAZE_END_CUT' ||
+          parsedCmd.type === 'GAZE_CANCEL_SELECTION' || parsedCmd.type === 'CANCEL_CUT' ||
+          parsedCmd.type === 'STOP_LISTENING') {
+        setVoiceState('processing-command');
+        await executeVoiceCommand(parsedCmd, commandText);
+        return;
+      }
+    }
+  }
+
+  // State: WAITING_CUT_CONFIRMATION
+  if (voiceState === 'waiting-cut-confirmation') {
+    const { hasWakePhrase, remainder } = parser.extractWakePhrase(utteranceToProcess, voiceSettings.voiceWakePhrase);
+    const commandText = hasWakePhrase && remainder ? remainder : utteranceToProcess;
+    const parsedCmd = parser.parseVoiceCommand(commandText);
+
+    if (parsedCmd && (parsedCmd.type === 'CONFIRM_CUT' || /^(confirm\s+cut|yes\s+cut|confirm)$/i.test(commandText))) {
+      setVoiceState('processing-command');
+      await executeVoiceCommand({ type: 'CONFIRM_CUT', intent: 'Confirm Cut', raw: utteranceToProcess }, commandText);
+      return;
+    } else if (parsedCmd && (parsedCmd.type === 'CANCEL_CUT' || parsedCmd.type === 'GAZE_CANCEL_SELECTION' || parsedCmd.type === 'STOP_LISTENING' || /^(cancel\s+cut|cancel|no|never\s+mind)$/i.test(commandText))) {
+      await executeVoiceCommand({ type: 'CANCEL_CUT', intent: 'Cancel Cut', raw: utteranceToProcess }, commandText);
+      return;
     }
   }
 
@@ -2575,6 +2668,73 @@ async function executeVoiceCommand(cmd, rawText, tabIdOverride = null) {
         break;
       }
 
+      case 'OPEN_WHATSAPP': {
+        const tabs = await chrome.tabs.query({ currentWindow: true });
+        const existingTab = tabs.find(t => t.url && t.url.includes('web.whatsapp.com'));
+        if (existingTab) {
+          await chrome.tabs.update(existingTab.id, { active: true });
+          result = { command: 'open whatsapp', success: true, message: 'Opened WhatsApp Web (switched to existing tab).' };
+        } else {
+          await chrome.tabs.create({ url: 'https://web.whatsapp.com/' });
+          result = { command: 'open whatsapp', success: true, message: 'Opened WhatsApp Web.' };
+        }
+        lastIntent = 'Opened WhatsApp Web';
+        setVoiceState('idle', {
+          message: result.message,
+          lastHeard,
+          lastIntent: 'Opened WhatsApp Web',
+          actionStatus: 'Opened WhatsApp Web'
+        });
+        lastCommandResult = result;
+        return;
+      }
+
+      case 'WEB_SEARCH': {
+        const query = (cmd.query || '').trim();
+        if (!query || cmd.error === 'EMPTY_QUERY') {
+          result = {
+            command: 'search',
+            success: false,
+            message: 'Please provide a search term. Example: "Sanchalan, search for accessible web design".'
+          };
+          lastIntent = 'Error / retry required';
+          setVoiceState('idle', {
+            message: result.message,
+            lastHeard,
+            lastIntent: 'Error / retry required',
+            actionStatus: 'Error / retry required'
+          });
+          lastCommandResult = result;
+          return;
+        }
+
+        const stored = await chrome.storage.local.get(['searchProvider']);
+        const provider = stored.searchProvider || 'google';
+        let searchBaseUrl = 'https://www.google.com/search?q=';
+        if (provider === 'bing') {
+          searchBaseUrl = 'https://www.bing.com/search?q=';
+        } else if (provider === 'duckduckgo') {
+          searchBaseUrl = 'https://duckduckgo.com/?q=';
+        }
+
+        const targetUrl = searchBaseUrl + encodeURIComponent(query);
+        await chrome.tabs.create({ url: targetUrl, active: true });
+        result = {
+          command: `search for "${query}"`,
+          success: true,
+          message: `Searching the web for "${query}".`
+        };
+        lastIntent = 'Searching the web';
+        setVoiceState('idle', {
+          message: result.message,
+          lastHeard,
+          lastIntent: 'Searching the web',
+          actionStatus: 'Searching the web'
+        });
+        lastCommandResult = result;
+        return;
+      }
+
       case 'CLOSE_TAB_REQUEST': {
         const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (activeTab) {
@@ -2668,11 +2828,192 @@ async function executeVoiceCommand(cmd, rawText, tabIdOverride = null) {
         break;
       }
 
+      case 'GAZE_START_COPY':
+      case 'GAZE_START_CUT': {
+        const action = cmd.action || (cmd.type === 'GAZE_START_CUT' ? 'cut' : 'copy');
+        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!activeTab || isBrowserInternalUrl(activeTab.url)) {
+          result = { command: `start ${action}`, success: false, message: 'Cannot select text on browser system pages. Focus a web page.' };
+          break;
+        }
+
+        if (activeGazeSelection) {
+          clearTimeout(activeGazeSelection.timer);
+        }
+
+        const startRes = await chrome.tabs.sendMessage(activeTab.id, {
+          type: 'GAZE_SELECTION_START',
+          action: action
+        }).catch((err) => ({ success: false, error: err.message }));
+
+        if (startRes && startRes.success) {
+          activeGazeSelection = {
+            action,
+            tabId: activeTab.id,
+            startTime: Date.now(),
+            timer: setTimeout(() => {
+              if (activeGazeSelection && activeGazeSelection.tabId === activeTab.id) {
+                cancelGazeSelection(activeTab.id);
+                setVoiceState('idle', {
+                  message: 'Selection timed out after 15s.',
+                  lastIntent: 'Timed Out'
+                });
+              }
+            }, 15000)
+          };
+
+          const promptAction = action === 'cut' ? 'cut' : 'copy';
+          const msg = `${promptAction === 'cut' ? 'Cut' : 'Copy'} selection started — look at the end text and say "Sanchalan, end ${promptAction}".`;
+          result = { command: `start ${action}`, success: true, message: msg };
+          lastIntent = 'Selection started';
+          setVoiceState('selection-pending', {
+            message: msg,
+            lastHeard,
+            lastIntent: 'Selection started',
+            actionStatus: 'Selection started'
+          });
+          lastCommandResult = result;
+          return;
+        } else {
+          result = {
+            command: `start ${action}`,
+            success: false,
+            message: startRes?.error || 'Look at selectable text and try again.'
+          };
+        }
+        break;
+      }
+
+      case 'GAZE_END_COPY':
+      case 'GAZE_END_CUT': {
+        const action = cmd.action || (cmd.type === 'GAZE_END_CUT' ? 'cut' : 'copy');
+        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!activeTab || isBrowserInternalUrl(activeTab.url)) {
+          result = { command: `end ${action}`, success: false, message: 'Cannot select text on browser system pages.' };
+          break;
+        }
+
+        if (activeGazeSelection) {
+          clearTimeout(activeGazeSelection.timer);
+          activeGazeSelection = null;
+        }
+
+        const endRes = await chrome.tabs.sendMessage(activeTab.id, {
+          type: 'GAZE_SELECTION_END',
+          action: action
+        }).catch((err) => ({ success: false, error: err.message }));
+
+        if (endRes && endRes.success) {
+          if (action === 'copy') {
+            if (endRes.text) {
+              extensionClipboard = endRes.text;
+              if (chrome.storage && chrome.storage.session) {
+                chrome.storage.session.set({ extensionClipboard: endRes.text }).catch(() => {});
+              }
+            }
+            const preview = (endRes.text || '').slice(0, 32);
+            result = {
+              command: 'end copy',
+              success: true,
+              message: `Copied "${preview}${endRes.text && endRes.text.length > 32 ? '...' : ''}"`
+            };
+            lastIntent = 'Copied text';
+            setVoiceState('idle', {
+              message: result.message,
+              lastHeard,
+              lastIntent: 'Copied text',
+              actionStatus: 'Copied text'
+            });
+            lastCommandResult = result;
+            return;
+          } else {
+            // Cut action: require explicit confirmation!
+            if (endRes.waitingConfirmation) {
+              pendingCutConfirmation = {
+                tabId: activeTab.id,
+                isGazeCut: true,
+                length: endRes.length || 0,
+                expiresAt: Date.now() + 15000
+              };
+              const msg = `Cut ${endRes.length} characters? Say "Sanchalan, confirm cut" or "cancel cut"`;
+              result = { command: 'end cut', success: true, message: msg };
+              lastIntent = 'Waiting for cut confirmation';
+              setVoiceState('waiting-cut-confirmation', {
+                message: msg,
+                lastHeard,
+                lastIntent: 'Waiting for cut confirmation',
+                actionStatus: 'Waiting for cut confirmation'
+              });
+              lastCommandResult = result;
+              return;
+            } else {
+              result = { command: 'end cut', success: false, message: endRes.error || 'Failed to prepare cut.' };
+            }
+          }
+        } else {
+          if (endRes && endRes.retryable) {
+            activeGazeSelection = {
+              action,
+              tabId: activeTab.id,
+              startTime: Date.now(),
+              timer: setTimeout(() => {
+                cancelGazeSelection(activeTab.id);
+                setVoiceState('idle', { message: 'Selection timed out.' });
+              }, 15000)
+            };
+            const msg = endRes.error || `No selectable text at gaze point. Look at the end text and say "end ${action}" again.`;
+            result = { command: `end ${action}`, success: false, message: msg };
+            setVoiceState('selection-pending', {
+              message: msg,
+              lastHeard,
+              lastIntent: 'Selection started',
+              actionStatus: 'Selection started'
+            });
+            lastCommandResult = result;
+            return;
+          }
+          result = { command: `end ${action}`, success: false, message: endRes?.error || 'Gaze selection failed.' };
+        }
+        break;
+      }
+
+      case 'CANCEL_CUT':
+      case 'GAZE_CANCEL_SELECTION': {
+        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (activeGazeSelection) {
+          clearTimeout(activeGazeSelection.timer);
+          const tId = activeGazeSelection.tabId;
+          activeGazeSelection = null;
+          if (tId) {
+            await chrome.tabs.sendMessage(tId, { type: 'GAZE_SELECTION_CANCEL' }).catch(() => {});
+          }
+        }
+        if (pendingCutConfirmation) {
+          const tId = pendingCutConfirmation.tabId;
+          pendingCutConfirmation = null;
+          if (tId) {
+            await chrome.tabs.sendMessage(tId, { type: 'GAZE_SELECTION_CANCEL' }).catch(() => {});
+          }
+        }
+        result = { command: 'cancel selection', success: true, message: 'Selection cancelled.' };
+        lastIntent = 'Cancel Selection';
+        setVoiceState('idle', { message: 'Selection cancelled.', lastHeard, lastIntent });
+        lastCommandResult = result;
+        return;
+      }
+
       case 'CONFIRM_CUT': {
         const targetId = tabIdOverride || (pendingCutConfirmation ? pendingCutConfirmation.tabId : null);
         if (targetId) {
+          const isGazeCut = pendingCutConfirmation && pendingCutConfirmation.isGazeCut;
           pendingCutConfirmation = null;
-          const execRes = await chrome.tabs.sendMessage(targetId, { type: 'VOICE_EXECUTE_DOM_ACTION', action: 'cut_execute' }).catch(() => null);
+          let execRes = null;
+          if (isGazeCut) {
+            execRes = await chrome.tabs.sendMessage(targetId, { type: 'GAZE_SELECTION_CONFIRM_CUT' }).catch(() => null);
+          } else {
+            execRes = await chrome.tabs.sendMessage(targetId, { type: 'VOICE_EXECUTE_DOM_ACTION', action: 'cut_execute' }).catch(() => null);
+          }
+
           if (execRes && execRes.success) {
             if (execRes.text) {
               extensionClipboard = execRes.text;
@@ -2680,7 +3021,16 @@ async function executeVoiceCommand(cmd, rawText, tabIdOverride = null) {
                 chrome.storage.session.set({ extensionClipboard: execRes.text }).catch(() => {});
               }
             }
-            result = { command: 'cut selected text', success: true, message: 'Cut selected text to clipboard.' };
+            result = { command: 'cut selected text', success: true, message: `Cut ${execRes.length || 'selected'} characters to clipboard.` };
+            lastIntent = 'Selection completed';
+            setVoiceState('idle', {
+              message: result.message,
+              lastHeard,
+              lastIntent: 'Selection completed',
+              actionStatus: 'Selection completed'
+            });
+            lastCommandResult = result;
+            return;
           } else {
             result = { command: 'cut selected text', success: false, message: execRes?.error || 'Failed to cut selection.' };
           }

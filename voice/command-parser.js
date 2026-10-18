@@ -177,11 +177,11 @@
     if (!clean) return null;
 
     // 1. Tab Navigation: Next / Previous
-    if (/^(next\s+tab|go\s+to\s+(the\s+)?next\s+tab|switch\s+(to\s+)?(the\s+)?next\s+tab|switch\s+next\s+tab)$/.test(clean)) {
+    if (/^(next\s+(?:tab|time)|go\s+to\s+(the\s+)?next\s+(?:tab|time)|switch\s+(to\s+)?(the\s+)?next\s+(?:tab|time)|switch\s+next\s+(?:tab|time))$/.test(clean)) {
       return { type: 'NEXT_TAB', intent: 'Next Tab', raw: text };
     }
 
-    if (/^(previous\s+tab|prev\s+tab|last\s+tab|go\s+to\s+(the\s+)?previous\s+tab|go\s+back\s+tab|switch\s+(to\s+)?(the\s+)?previous\s+tab)$/.test(clean)) {
+    if (/^(previous\s+(?:tab|time)|prev\s+(?:tab|time)|last\s+(?:tab|time)|go\s+to\s+(the\s+)?previous\s+(?:tab|time)|go\s+back\s+(?:tab|time)|switch\s+(to\s+)?(the\s+)?previous\s+(?:tab|time))$/.test(clean)) {
       return { type: 'PREV_TAB', intent: 'Previous Tab', raw: text };
     }
 
@@ -193,10 +193,10 @@
       return { type: 'CHOOSE_CANDIDATE', index, intent: `Choose Candidate #${index}`, raw: text };
     }
 
-    // 3. Tab Navigation: Switch to tab <number> or <title>
-    const switchMatch = clean.match(/^(switch\s+to\s+|go\s+to\s+|open\s+)?tab\s+(.+)$/);
+    // 3. Tab Navigation: Switch to tab / switch time / go to tab / change tab / change time
+    const switchMatch = clean.match(/^(?:switch\s+(?:to\s+)?(?:tabs?|time)|go\s+to\s+(?:tabs?|time)|change\s+(?:to\s+)?(?:tabs?|time)|open\s+(?:tabs?|time)|tabs?)\s+(.+)$/);
     if (switchMatch) {
-      const target = switchMatch[2].trim();
+      const target = switchMatch[1].trim();
       if (NUMBER_WORDS[target] !== undefined) {
         return { type: 'SWITCH_TAB_INDEX', tabIndex: NUMBER_WORDS[target], intent: `Switch to Tab #${NUMBER_WORDS[target]}`, raw: text };
       }
@@ -207,6 +207,11 @@
       return { type: 'SWITCH_TAB_TITLE', query: target, intent: `Switch to Tab "${target}"`, raw: text };
     }
 
+    // Bare "switch tab" / "switch time" without argument defaults to next tab
+    if (/^(?:switch\s+(?:to\s+)?(?:tabs?|time)|change\s+(?:to\s+)?(?:tabs?|time))$/.test(clean)) {
+      return { type: 'NEXT_TAB', intent: 'Next Tab', raw: text };
+    }
+
     // Direct "tab <number>" shorthand
     const tabNumMatch = clean.match(/^tab\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)$/);
     if (tabNumMatch) {
@@ -215,7 +220,12 @@
       return { type: 'SWITCH_TAB_INDEX', tabIndex: index, intent: `Switch to Tab #${index}`, raw: text };
     }
 
-    // 4. YouTube Commands
+    // 4. WhatsApp Web Navigation (checked before general search)
+    if (/^(?:open|launch|go\s+to)(?:\s+my)?\s+whatsapp(?:\s+web)?$/.test(clean)) {
+      return { type: 'OPEN_WHATSAPP', intent: 'Open WhatsApp Web', raw: text };
+    }
+
+    // 5. YouTube Commands (checked before general search so YouTube search takes strict priority)
     if (/^(?:open|go\s+to|launch)\s+youtube(?:\s+dot\s+com|\s+com|\.com)?$/.test(clean)) {
       return { type: 'OPEN_YOUTUBE', intent: 'Open YouTube', raw: text };
     }
@@ -227,7 +237,57 @@
       return { type: 'SEARCH_YOUTUBE', query, intent: `Search YouTube: "${query}"`, raw: text };
     }
 
-    // 5. Close Tab (requires confirmation)
+    // 6. General Web Search
+    // Reject empty queries with helpful guidance
+    if (/^(?:search\s+the\s+web(?:\s+for)?|search\s+for|search|look\s+up|google|find\s+online)$/.test(clean)) {
+      return { type: 'WEB_SEARCH', query: '', error: 'EMPTY_QUERY', intent: 'Web Search (Empty Query)', raw: text };
+    }
+
+    // "find <query> online" pattern
+    const findOnlineMatch = clean.match(/^find\s+(.+?)\s+online$/);
+    if (findOnlineMatch) {
+      const query = findOnlineMatch[1].trim();
+      return { type: 'WEB_SEARCH', query, intent: `Search the Web: "${query}"`, raw: text };
+    }
+
+    // "search for <query>", "search <query>", "search the web for <query>", "look up <query>", "google <query>"
+    const webSearchMatch = clean.match(/^(?:search\s+the\s+web\s+(?:for\s+)?|search\s+for\s+|search\s+|look\s+up\s+|google\s+|find\s+online\s+(?:for\s+)?)(.+)$/);
+    if (webSearchMatch) {
+      const query = webSearchMatch[1].trim();
+      return { type: 'WEB_SEARCH', query, intent: `Search the Web: "${query}"`, raw: text };
+    }
+
+    // 7. Gaze-Based Text Selection: Start / End / Cancel
+    // Start Copy variations:
+    if (/^(?:start\s+copy|start\s+copying|begin\s+copy|copy\s+from\s+here|mark\s+start\s+for\s+copy)$/.test(clean)) {
+      return { type: 'GAZE_START_COPY', action: 'copy', intent: 'Start Copy Selection', raw: text };
+    }
+
+    // End Copy variations:
+    if (/^(?:end\s+copy|finish\s+copy|copy\s+until\s+here|mark\s+end\s+for\s+copy)$/.test(clean)) {
+      return { type: 'GAZE_END_COPY', action: 'copy', intent: 'End Copy Selection', raw: text };
+    }
+
+    // Start Cut variations:
+    if (/^(?:start\s+cut|start\s+cutting|begin\s+cut|cut\s+from\s+here|mark\s+start\s+for\s+cut)$/.test(clean)) {
+      return { type: 'GAZE_START_CUT', action: 'cut', intent: 'Start Cut Selection', raw: text };
+    }
+
+    // End Cut variations:
+    if (/^(?:end\s+cut|finish\s+cut|cut\s+until\s+here|mark\s+end\s+for\s+cut)$/.test(clean)) {
+      return { type: 'GAZE_END_CUT', action: 'cut', intent: 'End Cut Selection', raw: text };
+    }
+
+    // Cancel Selection variations:
+    if (/^(?:cancel\s+selection|cancel\s+copy)$/.test(clean)) {
+      return { type: 'GAZE_CANCEL_SELECTION', intent: 'Cancel Selection', raw: text };
+    }
+
+    if (/^(?:cancel\s+cut)$/.test(clean)) {
+      return { type: 'CANCEL_CUT', intent: 'Cancel Cut', raw: text };
+    }
+
+    // 8. Close Tab (requires confirmation)
     if (/^(close\s+(the\s+)?(current\s+)?tab|close\s+this\s+tab|close\s+tab)$/.test(clean)) {
       return { type: 'CLOSE_TAB_REQUEST', intent: 'Close Current Tab (Confirmation Required)', raw: text };
     }
@@ -236,7 +296,7 @@
       return { type: 'CONFIRM_CLOSE_TAB', intent: 'Confirm Close Tab', raw: text };
     }
 
-    // 6. New Tab & Reload Tab
+    // 9. New Tab & Reload Tab
     if (/^(new\s+tab|open\s+(a\s+)?new\s+tab)$/.test(clean)) {
       return { type: 'NEW_TAB', intent: 'New Tab', raw: text };
     }
@@ -245,7 +305,7 @@
       return { type: 'RELOAD_TAB', intent: 'Reload Tab', raw: text };
     }
 
-    // 7. Browser History: Back / Forward
+    // 10. Browser History: Back / Forward
     if (/^(go\s+back|browser\s+back|navigate\s+back|history\s+back)$/.test(clean)) {
       return { type: 'GO_BACK', intent: 'Go Back', raw: text };
     }
@@ -254,7 +314,7 @@
       return { type: 'GO_FORWARD', intent: 'Go Forward', raw: text };
     }
 
-    // 8. Clipboard Actions: Copy, Cut, Paste, Select All
+    // 11. Clipboard Actions: Copy, Cut, Paste, Select All
     if (/^(copy\s+selected\s+text|copy\s+selection|copy\s+text|copy)$/.test(clean)) {
       return { type: 'COPY_SELECTION', intent: 'Copy Selected Text', raw: text };
     }
@@ -267,6 +327,10 @@
       return { type: 'CONFIRM_CUT', intent: 'Confirm Cut', raw: text };
     }
 
+    if (/^(cancel\s+cut)$/.test(clean)) {
+      return { type: 'CANCEL_CUT', intent: 'Cancel Cut', raw: text };
+    }
+
     if (/^(paste|paste\s+text|paste\s+clipboard)$/.test(clean)) {
       return { type: 'PASTE_TEXT', intent: 'Paste Text', raw: text };
     }
@@ -275,7 +339,7 @@
       return { type: 'SELECT_ALL', intent: 'Select All', raw: text };
     }
 
-    // 9. Undo & Redo
+    // 12. Undo & Redo
     if (/^(undo|undo\s+typing|revert)$/.test(clean)) {
       return { type: 'UNDO', intent: 'Undo', raw: text };
     }
@@ -284,7 +348,7 @@
       return { type: 'REDO', intent: 'Redo', raw: text };
     }
 
-    // 10. Dictation Control
+    // 13. Dictation Control
     if (/^(start\s+dictation|start\s+typing|begin\s+dictation|start\s+voice\s+typing)$/.test(clean)) {
       return { type: 'START_DICTATION', intent: 'Start Dictation', raw: text };
     }
@@ -293,7 +357,7 @@
       return { type: 'STOP_DICTATION', intent: 'Stop Dictation', raw: text };
     }
 
-    // 11. Stop Listening / Cancel
+    // 14. Stop Listening / Cancel
     if (/^(stop\s+listening|cancel|nevermind|never\s+mind|dismiss)$/.test(clean)) {
       return { type: 'STOP_LISTENING', intent: 'Stop Listening / Cancel', raw: text };
     }

@@ -118,10 +118,24 @@ Meanwhile, browsing the web means clicking countless links just to preview conte
     - `next tab` / `previous tab`
     - `switch to tab <number>` (e.g. "switch to tab 2", "switch to tab two")
     - `switch to tab <title>` (e.g. "switch to tab github", "switch to tab chat", "switch to tab new york times") — uses 6-tier ranked matching in the current window.
+    - `switch time <num/title>` (e.g. "switch time 4", "switch time YouTube", "go to time GitHub", "change tab 2", "change time 3") — ASR-tolerant aliases for tab switching that normalize "time" only within tab-switching command prefixes, preserving words like "time" in titles (e.g. "New York Times").
     - `choose <1-5>` (e.g. "sanchalan choose 1", "choose 2") to select numbered candidates when multiple tabs match.
     - `close current tab` (requires explicit "confirm close" confirmation)
     - `new tab` / `reload tab`
     - `go back` / `go forward`
+  - **Gaze-Based Text Range Selection (Copy & Cut):**
+    - Accessible two-point selection flow reusing existing gaze coordinates and events (no secondary webcam or duplicate tracking):
+      - **Copy:** Say *"Sanchalan, start copy"*, move gaze to ending text, then say *"Sanchalan, end copy"*.
+      - **Cut:** Say *"Sanchalan, start cut"*, move gaze to ending text, then say *"Sanchalan, end cut"*. Requires explicit confirmation (*"Sanchalan, confirm cut"* or *"cancel cut"*). Static page text is never cut.
+      - **Phrasing Variations:** Supports *"start copying"*, *"begin copy"*, *"copy from here"*, *"mark start for copy"*, *"finish copy"*, *"copy until here"*, *"mark end for copy"*, and matching cut phrases.
+      - **Cancel:** *"Sanchalan, cancel selection"*, *"cancel copy"*, *"cancel cut"*, or *"never mind"*.
+    - **Visual Feedback & Safety:** 15-second timeout with visible countdown overlay, pinned start marker (`📍 Start`), live gaze-tracking end marker (`👁️ End`), and caret resolution across standard text (`caretPositionFromPoint` with `caretRangeFromPoint` and scoped text-node fallbacks), `<input>`, `<textarea>`, and `contenteditable`.
+    - Handles backward gaze movement by automatically normalizing range boundaries.
+    - Suppresses conflicting link dwell tooltips during active selection sessions without blocking scrolling or gestures.
+  - **Web Navigation & Search:**
+    - `open whatsapp` / `open whatsapp web` / `launch whatsapp` / `go to whatsapp` / `open my whatsapp` (activates existing WhatsApp tab if already open, or creates a new active tab).
+    - `search for <query>` / `search <query>` / `search the web for <query>` / `look up <query>` / `google <query>` / `find <query> online` (preserves quotes and multiword queries, rejects empty queries, and uses the search provider configured in the side panel: Google default, Bing, DuckDuckGo).
+    - YouTube-specific commands (`open youtube`, `search in youtube <query>`) take strict priority over general web search.
   - **Editing & Clipboard:**
     - `copy` / `copy selected text`
     - `cut` / `cut selected text` (requires confirmation: "confirm cut" to prevent accidental data loss)

@@ -102,6 +102,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     elements.voiceInterpretedText = document.getElementById('voice-interpreted-text');
     elements.copyGesture = document.getElementById('copy-gesture');
     elements.pasteGesture = document.getElementById('paste-gesture');
+    elements.searchProvider = document.getElementById('search-provider');
     
     console.log('[Sidepanel] DOM elements retrieved:', {
       displayMode: elements.displayMode,
@@ -225,6 +226,7 @@ async function loadSettings() {
   if (elements.voiceLocalWhisperUrl) elements.voiceLocalWhisperUrl.value = voiceSettings.voiceLocalWhisperUrl;
   if (elements.copyGesture && stored.copyGesture) elements.copyGesture.value = stored.copyGesture;
   if (elements.pasteGesture && stored.pasteGesture) elements.pasteGesture.value = stored.pasteGesture;
+  if (elements.searchProvider && stored.searchProvider) elements.searchProvider.value = stored.searchProvider;
 
   updateProviderUI();
   updateVoiceSectionState(voiceSettings.voiceEnabled);
@@ -536,6 +538,12 @@ function setupEventListeners() {
     });
   }
 
+  if (elements.searchProvider) {
+    elements.searchProvider.addEventListener('change', (e) => {
+      chrome.storage.local.set({ searchProvider: e.target.value });
+    });
+  }
+
   if (elements.testMicBtn) {
     elements.testMicBtn.addEventListener('click', async () => {
       if (!elements.micTestFeedback) return;
@@ -617,7 +625,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'VOICE_STATE_CHANGED') {
-    updateVoiceStatus(message.state, message.message, message.lastHeard, message.lastIntent);
+    updateVoiceStatus(message.state, message.message, message.lastHeard, message.lastIntent, message.actionStatus);
     if (message.lastTranscript && elements.latestTranscript) {
       elements.latestTranscript.textContent = message.lastTranscript;
       elements.latestTranscript.style.fontStyle = 'normal';
@@ -779,29 +787,86 @@ function updateVoiceSectionState(enabled) {
   }
 }
 
-function updateVoiceStatus(state, message, heard, interpreted) {
+function updateVoiceStatus(state, message, heard, interpreted, actionStatus) {
   if (!elements.voiceStatusDot || !elements.voiceStatusText) return;
 
   elements.voiceStatusDot.className = 'status-dot';
 
-  const statusMap = {
-    'disabled': { class: '', pillClass: 'pill-disabled', pillText: 'Disabled', text: 'Disabled' },
-    'idle': { class: 'live', pillClass: 'pill-idle', pillText: 'Listening', text: message || `Listening for "${voiceSettings.voiceWakePhrase}"` },
-    'armed': { class: 'armed', pillClass: 'pill-armed', pillText: 'Armed', text: message || 'Listening for command... (5s)' },
-    'dictating': { class: 'dictating', pillClass: 'pill-dictating', pillText: 'Dictating', text: message || 'Dictating... (Say "stop dictation")' },
-    'processing-command': { class: 'loading', pillClass: 'pill-processing', pillText: 'Processing', text: message || 'Executing command...' },
-    'error': { class: 'error', pillClass: 'pill-error', pillText: 'Error', text: message || 'Voice error' }
-  };
+  let effectiveText = message || state;
+  let pillText = 'Idle';
+  let pillClass = 'pill-idle';
+  let dotClass = 'live';
 
-  const current = statusMap[state] || { class: '', pillClass: 'pill-disabled', pillText: state, text: message || state };
-  if (current.class) {
-    elements.voiceStatusDot.classList.add(current.class);
+  if (state === 'disabled') {
+    pillText = 'Disabled';
+    pillClass = 'pill-disabled';
+    dotClass = '';
+    effectiveText = 'Disabled';
+  } else if (state === 'selection-pending' || actionStatus === 'Selection started' || interpreted === 'Selection started') {
+    pillText = 'Selection started';
+    pillClass = 'pill-selection';
+    dotClass = 'armed';
+    effectiveText = message || 'Look at end text and say "end copy" or "end cut"';
+  } else if (state === 'waiting-cut-confirmation' || actionStatus === 'Waiting for cut confirmation' || interpreted === 'Waiting for cut confirmation') {
+    pillText = 'Waiting for cut confirmation';
+    pillClass = 'pill-armed';
+    dotClass = 'armed';
+    effectiveText = message || 'Say "confirm cut" or "cancel cut"';
+  } else if (actionStatus === 'Copied text' || interpreted === 'Copied text') {
+    pillText = 'Copied text';
+    pillClass = 'pill-success';
+    dotClass = 'live';
+    effectiveText = message || 'Copied text to clipboard';
+  } else if (actionStatus === 'Selection completed' || interpreted === 'Selection completed') {
+    pillText = 'Selection completed';
+    pillClass = 'pill-success';
+    dotClass = 'live';
+    effectiveText = message || 'Selection completed';
+  } else if (actionStatus === 'Opened WhatsApp Web' || interpreted === 'Opened WhatsApp Web') {
+    pillText = 'Opened WhatsApp Web';
+    pillClass = 'pill-success';
+    dotClass = 'live';
+    effectiveText = message || 'Opened WhatsApp Web';
+  } else if (actionStatus === 'Searching the web' || interpreted === 'Searching the web') {
+    pillText = 'Searching the web';
+    pillClass = 'pill-processing';
+    dotClass = 'loading';
+    effectiveText = message || 'Searching the web';
+  } else if (state === 'armed') {
+    pillText = 'Listening for command';
+    pillClass = 'pill-armed';
+    dotClass = 'armed';
+    effectiveText = message || 'Listening for command... (5s)';
+  } else if (state === 'dictating') {
+    pillText = 'Dictating';
+    pillClass = 'pill-dictating';
+    dotClass = 'dictating';
+    effectiveText = message || 'Dictating... (Say "stop dictation")';
+  } else if (state === 'processing-command') {
+    pillText = 'Executing command';
+    pillClass = 'pill-processing';
+    dotClass = 'loading';
+    effectiveText = message || 'Executing command...';
+  } else if (state === 'error' || actionStatus === 'Error / retry required' || interpreted === 'Error / retry required') {
+    pillText = 'Error / retry required';
+    pillClass = 'pill-error';
+    dotClass = 'error';
+    effectiveText = message || 'Error / retry required';
+  } else if (state === 'idle') {
+    pillText = 'Idle';
+    pillClass = 'pill-idle';
+    dotClass = 'live';
+    effectiveText = message || `Listening for "${voiceSettings.voiceWakePhrase}"`;
   }
-  elements.voiceStatusText.textContent = current.text;
+
+  if (dotClass) {
+    elements.voiceStatusDot.classList.add(dotClass);
+  }
+  elements.voiceStatusText.textContent = effectiveText;
 
   if (elements.voiceStatePill) {
-    elements.voiceStatePill.className = `state-pill ${current.pillClass}`;
-    elements.voiceStatePill.textContent = current.pillText;
+    elements.voiceStatePill.className = `state-pill ${pillClass}`;
+    elements.voiceStatePill.textContent = pillText;
   }
 
   if (heard !== undefined && elements.voiceHeardText) {
@@ -813,7 +878,7 @@ function updateVoiceStatus(state, message, heard, interpreted) {
   }
 
   if (elements.manualArmBtn) {
-    elements.manualArmBtn.disabled = !voiceSettings.voiceEnabled || state !== 'idle';
+    elements.manualArmBtn.disabled = !voiceSettings.voiceEnabled || (state !== 'idle' && state !== 'armed');
   }
 }
 

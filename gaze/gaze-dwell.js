@@ -648,6 +648,13 @@
     lastPointerY = rawY;
     edgeLoop(rawX, rawY);
 
+    if (window.__sanchalanSelectionActive) {
+      if (tooltip && tooltip.parentNode) {
+        hideTooltip();
+      }
+      return;
+    }
+
     const { x, y } = applyDeadzone(rawX, rawY);
 
     const ts = typeof detail.ts === 'number' ? detail.ts : performance.now();
@@ -1055,6 +1062,9 @@
   }
 
   window.addEventListener('blink:click', (event) => {
+    if (window.__sanchalanSelectionActive) {
+      return;
+    }
     const button = event && event.detail && event.detail.button === 'right' ? 2 : 0;
     const target = lastSnapLink || nearestLink(lastPointerX, lastPointerY) || document.elementFromPoint(lastPointerX, lastPointerY);
     if (!target) {
@@ -1067,6 +1077,9 @@
 
   // Smile-to-click: trigger click on magnetically snapped target when user smiles
   window.addEventListener('smile:click', (event) => {
+    if (window.__sanchalanSelectionActive) {
+      return;
+    }
     // Priority 1: Check if dwelling in navigation zone
     if (navZoneDwelling) {
       const now = performance.now();

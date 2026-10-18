@@ -1945,6 +1945,30 @@
       }
     }
 
+    if (message.type === 'GAZE_SELECTION_START') {
+      const res = handleGazeSelectionStart(message.action || 'copy');
+      sendResponse(res);
+      return true;
+    }
+
+    if (message.type === 'GAZE_SELECTION_END') {
+      const res = handleGazeSelectionEnd(message.action || 'copy');
+      sendResponse(res);
+      return true;
+    }
+
+    if (message.type === 'GAZE_SELECTION_CONFIRM_CUT') {
+      const res = handleGazeSelectionConfirmCut();
+      sendResponse(res);
+      return true;
+    }
+
+    if (message.type === 'GAZE_SELECTION_CANCEL') {
+      const res = handleGazeSelectionCancel();
+      sendResponse(res);
+      return true;
+    }
+
     if (message.type === 'VOICE_INSERT_TEXT') {
       const result = insertTextIntoActiveElement(message.text);
       sendResponse(result);
@@ -2370,8 +2394,556 @@
       }
     });
   });
-  
-  // Get initial display mode and gaze enabled status
+
+  // ========================================
+  // GAZE-BASED TEXT-RANGE SELECTION SUBSYSTEM
+  // ========================================
+
+  let latestGazePoint = { x: window.innerWidth / 2, y: window.innerHeight / 2, ts: 0 };
+  let gazeSelectionState = {
+    active: false,
+    action: 'copy',
+    startX: 0,
+    startY: 0,
+    startPos: null,
+    startTime: 0,
+    timer: null,
+    pendingCut: null
+  };
+
+  let selectionBannerEl = null;
+  let startMarkerEl = null;
+  let endMarkerEl = null;
+  let bannerInterval = null;
+
+  // Track live gaze coordinates dispatched by gaze-core / head-cal
+  window.addEventListener('gaze:point', (e) => {
+    if (e.detail && typeof e.detail.x === 'number' && typeof e.detail.y === 'number') {
+      latestGazePoint = {
+        x: e.detail.x,
+        y: e.detail.y,
+        ts: typeof e.detail.ts === 'number' ? e.detail.ts : Date.now()
+      };
+      if (gazeSelectionState.active && endMarkerEl) {
+        endMarkerEl.style.left = `${latestGazePoint.x}px`;
+        endMarkerEl.style.top = `${latestGazePoint.y}px`;
+      }
+    }
+  });
+
+  // Clean up selection on window unload / navigation
+  window.addEventListener('beforeunload', () => {
+    if (gazeSelectionState.active || gazeSelectionState.pendingCut) {
+      handleGazeSelectionCancel(true);
+    }
+  });
+
+  function getCharIndexInField(el, x, y) {
+    const text = el.value || '';
+    if (!text.length) return 0;
+    const rect = el.getBoundingClientRect();
+    const style = window.getComputedStyle(el);
+    const paddingLeft = parseFloat(style.paddingLeft) || 0;
+    const relX = Math.max(0, x - rect.left - paddingLeft + (el.scrollLeft || 0));
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.font = `${style.fontWeight || 'normal'} ${style.fontSize || '14px'} ${style.fontFamily || 'sans-serif'}`;
+
+    let bestIdx = 0;
+    let minDiff = Infinity;
+    for (let i = 0; i <= text.length; i++) {
+      const w = ctx.measureText(text.slice(0, i)).width;
+      const diff = Math.abs(w - relX);
+      if (diff < minDiff) {
+        minDiff = diff;
+        bestIdx = i;
+      }
+    }
+    return bestIdx;
+  }
+
+  function findNearestTextNode(rootEl, x, y) {
+    if (!rootEl) return null;
+    const walker = document.createTreeWalker(rootEl, NodeFilter.SHOW_TEXT, null, false);
+    let node;
+    let closestNode = null;
+    let closestOffset = 0;
+    let minDistance = Infinity;
+
+    while ((node = walker.nextNode())) {
+      const len = node.nodeValue ? node.nodeValue.length : 0;
+      if (len === 0) continue;
+      try {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const rects = range.getClientRects();
+        for (let r of rects) {
+          const dx = Math.max(r.left - x, 0, x - r.right);
+          const dy = Math.max(r.top - y, 0, y - r.bottom);
+          const dist = Math.hypot(dx, dy);
+          if (dist < minDistance) {
+            minDistance = dist;
+            closestNode = node;
+            const ratio = (x - r.left) / (r.width || 1);
+            closestOffset = Math.max(0, Math.min(len, Math.round(ratio * len)));
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (closestNode) {
+      return { node: closestNode, offset: closestOffset };
+    }
+    return null;
+  }
+
+  function resolveCaretPosition(x, y) {
+    const clampedX = Math.max(0, Math.min(window.innerWidth - 1, x));
+    const clampedY = Math.max(0, Math.min(window.innerHeight - 1, y));
+
+    const el = document.elementFromPoint(clampedX, clampedY);
+    if (!el) return null;
+
+    // Check if element is an <input> or <textarea>
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+      const idx = getCharIndexInField(el, clampedX, clampedY);
+      return {
+        type: 'field',
+        element: el,
+        index: idx,
+        isEditable: true,
+        x: clampedX,
+        y: clampedY
+      };
+    }
+
+    // Standard caretPositionFromPoint
+    if (document.caretPositionFromPoint) {
+      try {
+        const pos = document.caretPositionFromPoint(clampedX, clampedY);
+        if (pos && pos.offsetNode) {
+          const parentEl = pos.offsetNode.nodeType === Node.ELEMENT_NODE ? pos.offsetNode : pos.offsetNode.parentElement;
+          return {
+            type: 'dom',
+            node: pos.offsetNode,
+            offset: pos.offset,
+            element: parentEl,
+            isEditable: isEditableTarget(parentEl),
+            x: clampedX,
+            y: clampedY
+          };
+        }
+      } catch (e) {}
+    }
+
+    // WebKit/Blink caretRangeFromPoint
+    if (document.caretRangeFromPoint) {
+      try {
+        const range = document.caretRangeFromPoint(clampedX, clampedY);
+        if (range && range.startContainer) {
+          const parentEl = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
+          return {
+            type: 'dom',
+            node: range.startContainer,
+            offset: range.startOffset,
+            element: parentEl,
+            isEditable: isEditableTarget(parentEl),
+            x: clampedX,
+            y: clampedY
+          };
+        }
+      } catch (e) {}
+    }
+
+    // Fallback: search nearest text node in el
+    const fallback = findNearestTextNode(el, clampedX, clampedY);
+    if (fallback) {
+      return {
+        type: 'dom',
+        node: fallback.node,
+        offset: fallback.offset,
+        element: el,
+        isEditable: isEditableTarget(el),
+        x: clampedX,
+        y: clampedY
+      };
+    }
+
+    return null;
+  }
+
+  function showSelectionBanner(action, remainingSeconds = 15) {
+    if (!selectionBannerEl) {
+      selectionBannerEl = document.createElement('div');
+      selectionBannerEl.id = 'sanchalan-selection-banner';
+      selectionBannerEl.style.cssText = `
+        position: fixed;
+        top: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 2147483646;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 22px;
+        background: rgba(20, 20, 24, 0.94);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        color: #ffffff;
+        border: 1px solid rgba(245, 158, 11, 0.7);
+        border-radius: 30px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 13.5px;
+        font-weight: 500;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+        pointer-events: none;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+      `;
+      document.documentElement.appendChild(selectionBannerEl);
+    }
+
+    const actionText = action === 'cut' ? 'cut' : 'copy';
+    const actionIcon = action === 'cut' ? '✂️' : '📋';
+    const phrase = `Sanchalan, end ${actionText}`;
+
+    selectionBannerEl.innerHTML = `
+      <span style="font-size:16px;">${actionIcon}</span>
+      <span>${action === 'cut' ? 'Cut' : 'Copy'} selection started — look at the end text and say <strong>"${phrase}"</strong>.</span>
+      <span id="sanchalan-selection-timer" style="background:rgba(245,158,11,0.22); color:#fbbf24; border:1px solid rgba(245,158,11,0.5); padding:2px 8px; border-radius:12px; font-size:11px; font-weight:700;">${remainingSeconds}s</span>
+    `;
+    selectionBannerEl.style.display = 'flex';
+    selectionBannerEl.style.opacity = '1';
+  }
+
+  function hideSelectionBanner() {
+    if (selectionBannerEl && selectionBannerEl.parentNode) {
+      selectionBannerEl.style.opacity = '0';
+      setTimeout(() => {
+        if (selectionBannerEl && selectionBannerEl.parentNode) {
+          selectionBannerEl.style.display = 'none';
+        }
+      }, 200);
+    }
+    clearInterval(bannerInterval);
+  }
+
+  function createStartMarker(x, y) {
+    removeStartMarker();
+    startMarkerEl = document.createElement('div');
+    startMarkerEl.id = 'sanchalan-start-marker';
+    startMarkerEl.style.cssText = `
+      position: fixed;
+      left: ${x}px;
+      top: ${y}px;
+      z-index: 2147483646;
+      pointer-events: none;
+      transform: translate(-50%, -100%);
+      transition: none;
+    `;
+    startMarkerEl.innerHTML = `
+      <div style="background:#2563eb; color:#ffffff; font-size:11px; font-weight:700; padding:3px 9px; border-radius:12px; box-shadow:0 3px 12px rgba(37,99,235,0.45); border:1px solid #60a5fa; display:flex; align-items:center; gap:4px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+        <span>📍 Start</span>
+      </div>
+    `;
+    document.documentElement.appendChild(startMarkerEl);
+  }
+
+  function removeStartMarker() {
+    if (startMarkerEl && startMarkerEl.parentNode) {
+      startMarkerEl.parentNode.removeChild(startMarkerEl);
+      startMarkerEl = null;
+    }
+  }
+
+  function createEndMarker(x, y) {
+    removeEndMarker();
+    endMarkerEl = document.createElement('div');
+    endMarkerEl.id = 'sanchalan-end-marker';
+    endMarkerEl.style.cssText = `
+      position: fixed;
+      left: ${x}px;
+      top: ${y}px;
+      z-index: 2147483646;
+      pointer-events: none;
+      transform: translate(-50%, -100%);
+      transition: left 0.08s ease-out, top 0.08s ease-out;
+    `;
+    endMarkerEl.innerHTML = `
+      <div style="background:#059669; color:#ffffff; font-size:11px; font-weight:700; padding:3px 9px; border-radius:12px; box-shadow:0 3px 12px rgba(5,150,105,0.45); border:1px solid #34d399; display:flex; align-items:center; gap:4px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+        <span>👁️ End</span>
+      </div>
+    `;
+    document.documentElement.appendChild(endMarkerEl);
+  }
+
+  function removeEndMarker() {
+    if (endMarkerEl && endMarkerEl.parentNode) {
+      endMarkerEl.parentNode.removeChild(endMarkerEl);
+      endMarkerEl = null;
+    }
+  }
+
+  function handleGazeSelectionStart(action) {
+    const now = Date.now();
+    let currentX = latestGazePoint.x;
+    let currentY = latestGazePoint.y;
+
+    // Freshness check: require recent gaze coordinates
+    if (!latestGazePoint.ts || (now - latestGazePoint.ts > 3500)) {
+      showVoiceHud('⚠️ Gaze pointer not detected or stale. Please look at the text and try again.', 'warning', 3000);
+      return { success: false, error: 'Gaze pointer not detected or stale. Please look at the text and try again.' };
+    }
+
+    const startPos = resolveCaretPosition(currentX, currentY);
+    if (!startPos) {
+      showVoiceHud('⚠️ Look at selectable text and try again', 'warning', 2500);
+      return { success: false, error: 'Look at selectable text and try again.' };
+    }
+
+    gazeSelectionState.active = true;
+    gazeSelectionState.action = action;
+    gazeSelectionState.startX = currentX;
+    gazeSelectionState.startY = currentY;
+    gazeSelectionState.startPos = startPos;
+    gazeSelectionState.startTime = now;
+    gazeSelectionState.pendingCut = null;
+    window.__sanchalanSelectionActive = true;
+
+    createStartMarker(currentX, currentY);
+    createEndMarker(currentX, currentY);
+
+    let secondsLeft = 15;
+    showSelectionBanner(action, secondsLeft);
+    clearInterval(bannerInterval);
+    bannerInterval = setInterval(() => {
+      secondsLeft--;
+      const timerEl = document.getElementById('sanchalan-selection-timer');
+      if (timerEl) {
+        timerEl.textContent = `${secondsLeft}s`;
+      }
+      if (secondsLeft <= 0) {
+        clearInterval(bannerInterval);
+        handleGazeSelectionTimeout();
+      }
+    }, 1000);
+
+    clearTimeout(gazeSelectionState.timer);
+    gazeSelectionState.timer = setTimeout(() => {
+      handleGazeSelectionTimeout();
+    }, 15000);
+
+    return { success: true };
+  }
+
+  function handleGazeSelectionTimeout() {
+    if (!gazeSelectionState.active) return;
+    handleGazeSelectionCancel(false);
+    showVoiceHud('⏱️ Selection timed out after 15s', 'normal', 3000);
+    chrome.runtime.sendMessage({
+      type: 'VOICE_SELECTION_TIMEOUT',
+      message: 'Selection timed out.'
+    }).catch(() => {});
+  }
+
+  function handleGazeSelectionEnd(action) {
+    if (!gazeSelectionState.active) {
+      return { success: false, error: 'No selection started. Say "Sanchalan, start ' + (action || 'copy') + '" first.' };
+    }
+
+    const now = Date.now();
+    if (!latestGazePoint.ts || (now - latestGazePoint.ts > 3500)) {
+      return {
+        success: false,
+        retryable: true,
+        error: 'Gaze pointer coordinates are stale. Look steadily at the end text and retry.'
+      };
+    }
+
+    const endPos = resolveCaretPosition(latestGazePoint.x, latestGazePoint.y);
+    if (!endPos) {
+      return {
+        success: false,
+        retryable: true,
+        error: 'No selectable text at gaze point. Look at the end text and say "end ' + (action || gazeSelectionState.action) + '" again.'
+      };
+    }
+
+    const startPos = gazeSelectionState.startPos;
+    let selectedText = '';
+    let selectionInfo = null;
+
+    // Selection inside input / textarea
+    if (startPos.type === 'field' && endPos.type === 'field' && startPos.element === endPos.element) {
+      const el = startPos.element;
+      const s = Math.min(startPos.index, endPos.index);
+      const e = Math.max(startPos.index, endPos.index);
+      el.focus();
+      el.setSelectionRange(s, e);
+      selectedText = el.value.slice(s, e);
+      selectionInfo = {
+        isField: true,
+        isEditable: true,
+        element: el,
+        start: s,
+        end: e,
+        text: selectedText
+      };
+    } else {
+      // Regular page text or contenteditable: normalize Range for forward and backward look
+      let range = document.createRange();
+      let startNode = startPos.node;
+      let startOffset = startPos.offset;
+      let endNode = endPos.node;
+      let endOffset = endPos.offset;
+
+      if (!startNode || !endNode) {
+        return {
+          success: false,
+          retryable: true,
+          error: 'Could not resolve valid text boundary. Look at text and try again.'
+        };
+      }
+
+      if (startNode === endNode) {
+        const s = Math.min(startOffset, endOffset);
+        const e = Math.max(startOffset, endOffset);
+        range.setStart(startNode, s);
+        range.setEnd(startNode, e);
+      } else {
+        const comparison = startNode.compareDocumentPosition(endNode);
+        if (comparison & Node.DOCUMENT_POSITION_FOLLOWING) {
+          // Forward selection
+          range.setStart(startNode, startOffset);
+          range.setEnd(endNode, endOffset);
+        } else {
+          // Backward selection: user looked backward! Normalize start and end positions
+          range.setStart(endNode, endOffset);
+          range.setEnd(startNode, startOffset);
+        }
+      }
+
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      selectedText = sel.toString();
+
+      const commonAncestor = range.commonAncestorContainer;
+      const parentEl = commonAncestor.nodeType === Node.ELEMENT_NODE ? commonAncestor : commonAncestor.parentElement;
+      const isEditable = isEditableTarget(parentEl);
+
+      selectionInfo = {
+        isField: false,
+        isEditable: isEditable,
+        element: parentEl,
+        range: range,
+        text: selectedText
+      };
+    }
+
+    if (!selectedText || selectedText.trim().length === 0) {
+      return {
+        success: false,
+        retryable: true,
+        error: 'Selected range is empty. Look at the end text and retry.'
+      };
+    }
+
+    // Clean up active selection pending UI
+    clearTimeout(gazeSelectionState.timer);
+    hideSelectionBanner();
+    removeStartMarker();
+    removeEndMarker();
+    gazeSelectionState.active = false;
+    window.__sanchalanSelectionActive = false;
+
+    // Action: COPY
+    if (gazeSelectionState.action === 'copy' || action === 'copy') {
+      navigator.clipboard.writeText(selectedText).catch(() => {
+        try { document.execCommand('copy'); } catch (e) {}
+      });
+      showVoiceHud(`✓ Copied text (${selectedText.length} chars)`, 'success', 2500);
+      return { success: true, text: selectedText };
+    }
+
+    // Action: CUT
+    if (gazeSelectionState.action === 'cut' || action === 'cut') {
+      // Must be in an editable element
+      if (!selectionInfo.isEditable && !selectionInfo.isField) {
+        showVoiceHud('⚠️ Cannot cut ordinary page text. Text can only be copied.', 'normal', 3500);
+        return {
+          success: false,
+          isNotEditable: true,
+          error: 'Cannot cut ordinary static page text. Text can only be copied.'
+        };
+      }
+
+      // Store pending cut data for confirmation
+      gazeSelectionState.pendingCut = selectionInfo;
+      const charCount = selectedText.length;
+      showVoiceHud(`✂️ Cut ${charCount} characters? Say "Sanchalan, confirm cut" or "cancel cut"`, 'armed', 15000);
+
+      return {
+        success: true,
+        waitingConfirmation: true,
+        length: charCount,
+        text: selectedText
+      };
+    }
+
+    return { success: true, text: selectedText };
+  }
+
+  function handleGazeSelectionConfirmCut() {
+    const cutData = gazeSelectionState.pendingCut;
+    if (!cutData || !cutData.text) {
+      showVoiceHud('⚠️ No cut action pending confirmation', 'normal', 2500);
+      return { success: false, error: 'No cut action pending confirmation.' };
+    }
+
+    const text = cutData.text;
+    const len = text.length;
+
+    // Copy to clipboard
+    navigator.clipboard.writeText(text).catch(() => {
+      try { document.execCommand('copy'); } catch (e) {}
+    });
+
+    if (cutData.isField && cutData.element) {
+      const el = cutData.element;
+      el.focus();
+      el.value = el.value.slice(0, cutData.start) + el.value.slice(cutData.end);
+      el.selectionStart = el.selectionEnd = cutData.start;
+      el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+    } else if (cutData.range) {
+      try {
+        cutData.range.deleteContents();
+      } catch (e) {
+        try { document.execCommand('delete'); } catch (e2) {}
+      }
+    }
+
+    gazeSelectionState.pendingCut = null;
+    showVoiceHud(`✓ Cut ${len} characters`, 'success', 2500);
+    return { success: true, length: len, text };
+  }
+
+  function handleGazeSelectionCancel(silent = false) {
+    clearTimeout(gazeSelectionState.timer);
+    clearInterval(bannerInterval);
+    hideSelectionBanner();
+    removeStartMarker();
+    removeEndMarker();
+    gazeSelectionState.active = false;
+    gazeSelectionState.pendingCut = null;
+    window.__sanchalanSelectionActive = false;
+
+    if (!silent) {
+      showVoiceHud('Selection cancelled', 'normal', 2000);
+    }
+    return { success: true };
+  }
   chrome.storage.local.get(['displayMode', 'gazeEnabled'], (result) => {
     if (result.displayMode) {
       displayMode = result.displayMode;
