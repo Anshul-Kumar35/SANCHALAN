@@ -75,14 +75,6 @@ const stream = session.promptStreaming(prompt);
 
 ---
 
-## 🎥 Demo Video
-
-> **[📹 Watch the demo video](https://youtu.be/KVOM2VvWypE?si=3GpD8lM9ZrEP934)**
-
-See SANCHALAN in action - browse Wikipedia entirely hands-free and get AI-powered summaries with just head movements!
-
----
-
 ## 🌟 The Problem
 
 For millions of people with mobility impairments, ALS, cerebral palsy, RSI, or temporary disabilities, using a traditional mouse and keyboard is painful, difficult, or impossible. Existing assistive technologies often:
@@ -199,8 +191,8 @@ Meanwhile, browsing the web means clicking countless links just to preview conte
 
 1. **Clone repository:**
    ```bash
-   git clone https://github.com/yourusername/nutshell.git
-   cd nutshell
+   git clone https://github.com/Anshul-Kumar35/SANCHALAN.git
+   cd SANCHALAN
    ```
 
 2. **Load extension:**
@@ -317,7 +309,7 @@ Page Load → Inject XHR Interceptor → Monitor Network Requests
 ## 📁 Project Structure
 
 ```
-nutshell/
+SANCHALAN/
 ├── manifest.json              # Extension config (MV3)
 ├── background.js              # AI processing, job management
 ├── content.js                 # Link detection, tooltips
@@ -468,12 +460,6 @@ Built with amazing open-source tools:
 
 ---
 
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) for details
-
----
-
 ## 🤝 Contributing
 
 Built for the Chrome Built-in AI Hackathon! Contributions welcome:
@@ -501,6 +487,6 @@ Built for the Chrome Built-in AI Hackathon! Contributions welcome:
 
 *Empowering digital independence through on-device AI*
 
-🥜 *SANCHALAN: Browse hands-free, understand faster.*
+🥜 *SANCHALAN: Hands-free digital independence for motor disabilities.*
 
 </div>
