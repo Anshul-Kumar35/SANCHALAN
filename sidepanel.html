@@ -84,6 +84,271 @@
 
     <hr>
 
+    <!-- Voice Interaction Section -->
+    <div id="voice-section">
+      <h3>🎙️ Voice Input (Hands-Free)</h3>
+
+      <!-- Master Voice Toggle -->
+      <div class="setting-group">
+        <label class="toggle-container">
+          <input type="checkbox" id="voice-enabled">
+          <span class="toggle-slider"></span>
+          <span class="toggle-label">Enable Voice Interaction</span>
+        </label>
+        <p class="help-text">Speech recognition for hands-free typing and browser commands</p>
+      </div>
+
+      <!-- Microphone & State Status -->
+      <div class="status-indicator" id="voice-status-wrapper">
+        <span class="status-dot" id="voice-status-dot"></span>
+        <span id="voice-status-text">Disabled</span>
+        <span id="voice-state-pill" class="state-pill pill-disabled">Disabled</span>
+      </div>
+
+      <!-- Live Heard & Interpreted Diagnostics -->
+      <div class="voice-diagnostics-card">
+        <div class="diag-row">
+          <span class="diag-label">Heard:</span>
+          <span id="voice-heard-text" class="diag-value">None</span>
+        </div>
+        <div class="diag-row">
+          <span class="diag-label">Interpreted as:</span>
+          <span id="voice-interpreted-text" class="diag-value">None</span>
+        </div>
+      </div>
+
+      <div class="voice-btn-row">
+        <button id="test-mic-btn" class="btn secondary">
+          Test Microphone
+        </button>
+        <button id="manual-arm-btn" class="btn secondary" disabled>
+          Arm Command
+        </button>
+      </div>
+      <p id="mic-test-feedback" class="help-text voice-feedback hidden"></p>
+
+      <!-- Collapsible Voice Commands Cheat Sheet -->
+      <details class="voice-commands-help" open>
+        <summary><strong>📖 Voice Commands Cheat Sheet</strong></summary>
+        <div class="voice-commands-content">
+          <div class="cheat-sheet-note">
+            💡 Say <strong>"Sanchalan"</strong> before a command. While dictation is active, <strong>"stop dictation"</strong> works without the wake word.
+          </div>
+
+          <div class="command-group">
+            <span class="group-title">Tabs & Navigation</span>
+            <ul class="command-list">
+              <li><code>"Sanchalan, next tab"</code></li>
+              <li><code>"Sanchalan, previous tab"</code></li>
+              <li><code>"Sanchalan, switch to tab 3"</code></li>
+              <li><code>"Sanchalan, switch tab GitHub"</code></li>
+              <li><code>"Sanchalan, switch time YouTube"</code></li>
+              <li><code>"Sanchalan, choose 1"</code> (for ambiguous matches)</li>
+            </ul>
+          </div>
+
+          <div class="command-group">
+            <span class="group-title">Gaze Text Selection (Copy & Cut)</span>
+            <ul class="command-list">
+              <li><code>"Sanchalan, start copy"</code></li>
+              <li style="list-style:none; padding-left:12px; font-size:11px; opacity:0.85;">↳ Move gaze to the ending text</li>
+              <li><code>"Sanchalan, end copy"</code></li>
+              <li><code>"Sanchalan, start cut"</code></li>
+              <li style="list-style:none; padding-left:12px; font-size:11px; opacity:0.85;">↳ Move gaze to the ending text</li>
+              <li><code>"Sanchalan, end cut"</code></li>
+              <li><code>"Sanchalan, confirm cut"</code></li>
+              <li><code>"Sanchalan, cancel selection"</code></li>
+            </ul>
+          </div>
+
+          <div class="command-group">
+            <span class="group-title">Web Navigation & Search</span>
+            <ul class="command-list">
+              <li><code>"Sanchalan, open WhatsApp"</code></li>
+              <li><code>"Sanchalan, search for <query>"</code></li>
+              <li><code>"Sanchalan, open YouTube"</code></li>
+              <li><code>"Sanchalan, search in YouTube <query>"</code></li>
+            </ul>
+          </div>
+
+          <div class="command-group">
+            <span class="group-title">Browser Actions</span>
+            <ul class="command-list">
+              <li><code>"Sanchalan, new tab"</code></li>
+              <li><code>"Sanchalan, reload tab"</code></li>
+              <li><code>"Sanchalan, go back"</code></li>
+              <li><code>"Sanchalan, go forward"</code></li>
+              <li><code>"Sanchalan, close tab"</code> (asks confirmation)</li>
+            </ul>
+          </div>
+
+          <div class="command-group">
+            <span class="group-title">Dictation (Voice Typing)</span>
+            <ul class="command-list">
+              <li><code>"Sanchalan, start dictation"</code></li>
+              <li><code>"Stop dictation"</code> (or <code>"stop typing"</code>)</li>
+            </ul>
+          </div>
+
+          <div class="command-group">
+            <span class="group-title">Editing & Clipboard</span>
+            <ul class="command-list">
+              <li><code>"Sanchalan, copy selected text"</code></li>
+              <li><code>"Sanchalan, cut selected text"</code> (asks confirmation)</li>
+              <li><code>"Sanchalan, paste"</code></li>
+              <li><code>"Sanchalan, select all"</code></li>
+              <li><code>"Sanchalan, undo"</code> / <code>"redo"</code></li>
+            </ul>
+          </div>
+        </div>
+      </details>
+
+      <!-- Feature Toggles & Controls -->
+      <div class="voice-subcontrols" id="voice-subcontrols">
+        <div class="setting-group compact">
+          <label class="toggle-container">
+            <input type="checkbox" id="voice-commands-enabled" checked>
+            <span class="toggle-slider"></span>
+            <span class="toggle-label">Voice Commands</span>
+          </label>
+          <p class="help-text">Control tabs, navigation, and clipboard via speech</p>
+        </div>
+
+        <div class="setting-group compact">
+          <label class="toggle-container">
+            <input type="checkbox" id="voice-typing-enabled" checked>
+            <span class="toggle-slider"></span>
+            <span class="toggle-label">Voice Typing (Dictation)</span>
+          </label>
+          <p class="help-text">Transcribe speech directly into web text fields</p>
+        </div>
+
+        <div class="setting-group compact">
+          <label class="toggle-container">
+            <input type="checkbox" id="voice-gesture-enabled">
+            <span class="toggle-slider"></span>
+            <span class="toggle-label">Mouth Gesture Arming</span>
+          </label>
+          <p class="help-text">Hold mouth open for 900ms to arm commands without wake phrase</p>
+        </div>
+
+        <!-- Web Search Provider Setting -->
+        <div class="setting-group">
+          <label class="setting-label" for="search-provider">Web Search Provider:</label>
+          <select id="search-provider" class="setting-select">
+            <option value="google" selected>Google (Default)</option>
+            <option value="bing">Bing</option>
+            <option value="duckduckgo">DuckDuckGo</option>
+          </select>
+          <p class="help-text">Search engine used for "search for &lt;query&gt;" commands</p>
+        </div>
+
+        <!-- Optional Deliberate Clipboard Gestures -->
+        <div class="setting-group">
+          <label class="setting-label" for="copy-gesture">Copy Gesture (Optional):</label>
+          <select id="copy-gesture" class="setting-select">
+            <option value="none" selected>Disabled</option>
+            <option value="tilt_left">Head Tilt Left (hold 650ms)</option>
+            <option value="nod_up">Head Nod Up (hold 650ms)</option>
+            <option value="turn_left">Head Turn Left (hold 650ms)</option>
+          </select>
+          <p class="help-text">Deliberate head gesture to copy selected text (conflict-free)</p>
+        </div>
+
+        <div class="setting-group">
+          <label class="setting-label" for="paste-gesture">Paste Gesture (Optional):</label>
+          <select id="paste-gesture" class="setting-select">
+            <option value="none" selected>Disabled</option>
+            <option value="tilt_right">Head Tilt Right (hold 650ms)</option>
+            <option value="nod_down">Head Nod Down (hold 650ms)</option>
+            <option value="turn_right">Head Turn Right (hold 650ms)</option>
+          </select>
+          <p class="help-text">Deliberate head gesture to paste clipboard text (conflict-free)</p>
+        </div>
+
+        <!-- Configuration -->
+        <div class="setting-group">
+          <label class="setting-label" for="voice-wake-phrase">Wake Phrase:</label>
+          <input type="text" id="voice-wake-phrase" class="setting-input" value="sanchalan" placeholder="e.g. sanchalan">
+          <p class="help-text">Spoken trigger to activate command listening</p>
+        </div>
+
+        <div class="setting-group">
+          <label class="setting-label" for="voice-command-timeout">
+            Command Timeout: <span id="voice-timeout-value">5</span>s
+          </label>
+          <input type="range" id="voice-command-timeout" min="3000" max="10000" step="500" value="5000" class="slider">
+          <p class="help-text">Listening window duration after wake trigger</p>
+        </div>
+
+        <div class="setting-group">
+          <label class="setting-label" for="voice-language">Speech Language:</label>
+          <select id="voice-language" class="setting-select">
+            <option value="en-US" selected>English (US)</option>
+            <option value="en-IN">English (India)</option>
+            <option value="en-GB">English (UK)</option>
+            <option value="hi-IN">Hindi (India)</option>
+          </select>
+        </div>
+
+        <!-- STT Provider Selection -->
+        <div class="setting-group">
+          <label class="setting-label" for="voice-provider">Transcription Provider:</label>
+          <select id="voice-provider" class="setting-select">
+            <option value="webspeech" selected>Web Speech API (Browser built-in)</option>
+            <option value="sarvam">Sarvam AI (Backend Proxy - Stage 2)</option>
+            <option value="whisper">Local Whisper (Companion Service - Stage 2)</option>
+          </select>
+          <p id="provider-note" class="help-text">Browser built-in recognition for development and demos.</p>
+        </div>
+
+        <!-- Endpoint Placeholders -->
+        <div id="sarvam-config-group" class="setting-group hidden">
+          <label class="setting-label" for="voice-backend-url">Sarvam Backend Proxy URL:</label>
+          <input type="url" id="voice-backend-url" class="setting-input" placeholder="https://api.yourbackend.com/sarvam-stt">
+          <p class="help-text">Stage 2: Requires secure backend proxy. Direct API keys are never stored in the extension.</p>
+        </div>
+
+        <div id="whisper-config-group" class="setting-group hidden">
+          <label class="setting-label" for="voice-local-whisper-url">Local Whisper Companion URL:</label>
+          <input type="url" id="voice-local-whisper-url" class="setting-input" value="http://localhost:8080/v1/transcribe" placeholder="http://localhost:8080/v1/transcribe">
+          <p class="help-text">Stage 2: Connects to your localhost companion server. No bulky models bundled.</p>
+        </div>
+
+        <!-- Live Activity Display Cards -->
+        <div class="voice-activity-card">
+          <div class="card-header">
+            <span class="card-title">Latest Transcript</span>
+            <button id="copy-transcript-btn" class="icon-btn" title="Copy transcript to clipboard" disabled>📋 Copy</button>
+          </div>
+          <div id="latest-transcript" class="transcript-box">No speech detected yet.</div>
+        </div>
+
+        <div class="voice-activity-card">
+          <div class="card-header">
+            <span class="card-title">Last Command & Result</span>
+          </div>
+          <div id="last-command-result" class="command-box">Idle</div>
+        </div>
+
+        <!-- Ambiguous Tab Candidates Card -->
+        <div id="tab-candidates-card" class="voice-activity-card hidden">
+          <div class="card-header">
+            <span class="card-title">Matching Tabs</span>
+          </div>
+          <p class="help-text">Multiple tabs matched your query. Click one or say "sanchalan choose 1" through "choose 5":</p>
+          <ul id="tab-candidates-list" class="tab-candidates-list"></ul>
+        </div>
+
+        <!-- Privacy & Security Notice -->
+        <div class="privacy-note">
+          🔒 <strong>Privacy & Security:</strong> Audio capture executes strictly in a local offscreen document. No microphone data is forwarded to external servers without explicit provider selection. API keys are never stored in client extension storage or code.
+        </div>
+      </div>
+    </div>
+
+    <hr>
+
     <!-- Settings Section -->
     <div id="settings-section">
       <h3>🤖 AI Summarization</h3>

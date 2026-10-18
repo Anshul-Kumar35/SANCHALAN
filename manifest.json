@@ -14,7 +14,10 @@
     "storage",
     "tabs",
     "scripting",
-    "webNavigation"
+    "webNavigation",
+    "offscreen",
+    "clipboardRead",
+    "clipboardWrite"
   ],
   "host_permissions": [
     "<all_urls>"
