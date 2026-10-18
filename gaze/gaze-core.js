@@ -80,8 +80,23 @@ let headAutoCenter = { nx: 0, ny: 0, ready: false };
   let lastMouthClickTime = 0;            // Track last mouth-open click for cooldown
   let lastMouthRatio = 0;                // Track mouth aspect ratio for debugging
   let mouthCalibration = null;           // Stores { closedRatio, openRatio, threshold }
-  let mouthCalSamples = [];              // Temporary calibration samples
   let mouthClickEnabled = false;         // Whether mouth clicking is enabled
+  let voiceGestureEnabled = false;       // Arm voice commands via mouth hold gesture
+  let mouthOpenHoldStartTime = 0;        // Timestamp when mouth first opened
+  let gestureArmTriggeredThisHold = false; // Flag to prevent multi-triggering per hold
+  let lastGestureArmTime = 0;            // Cooldown tracker for voice gesture
+  const GESTURE_HOLD_DURATION_MS = 900;  // 900ms hold required for voice gesture
+  const GESTURE_COOLDOWN_MS = 2000;      // 2000ms cooldown after gesture fires
+
+  // Optional deliberate gestures for clipboard actions
+  let copyGesture = 'none';              // 'none' | 'tilt_left' | 'nod_up' | 'turn_left'
+  let pasteGesture = 'none';             // 'none' | 'tilt_right' | 'nod_down' | 'turn_right'
+  let copyGestureHoldStart = 0;
+  let pasteGestureHoldStart = 0;
+  let lastCopyGestureTime = 0;
+  let lastPasteGestureTime = 0;
+  const CLIPBOARD_GESTURE_HOLD_MS = 650;
+  const CLIPBOARD_GESTURE_COOLDOWN_MS = 2200;
 
   let gazeEnabled = false;
   if (typeof window.__gazeHeadMode !== 'boolean') {
@@ -873,8 +888,10 @@ let headAutoCenter = { nx: 0, ny: 0, ready: false };
 
     const yawRad = Number(face.rotation && face.rotation.angle ? face.rotation.angle.yaw : 0);
     const pitchRad = Number(face.rotation && face.rotation.angle ? face.rotation.angle.pitch : 0);
+    const rollRad = Number(face.rotation && face.rotation.angle ? face.rotation.angle.roll : 0);
     const yawDeg = yawRad * (180 / Math.PI);
     const pitchDeg = pitchRad * (180 / Math.PI);
+    const rollDeg = rollRad * (180 / Math.PI);
 
     // Debug: Log rotation data once to check if it's being populated
     if (!window.__rotationLogged) {
@@ -925,24 +942,103 @@ let headAutoCenter = { nx: 0, ny: 0, ready: false };
       lastMouthRatio = mouthRatio;
       window.__lastMouthRatio = mouthRatio;  // Store globally for preview display and calibration
 
-      // Only detect clicks if calibrated, enabled, and NOT calibrating
-      if (mouthCalibration && mouthClickEnabled && !window.__gazeMouthCalActive) {
-        const threshold = mouthCalibration.threshold;
+      // Gesture and click detection (only active when NOT in mouth calibration mode)
+      if (!window.__gazeMouthCalActive) {
+        const threshold = mouthCalibration ? mouthCalibration.threshold : 0.35;
+        const isMouthOpen = mouthRatio > threshold;
 
-        // Debug log mouth ratio - log every 100 frames to see patterns
-        if (!window.__mouthFrameCount) window.__mouthFrameCount = 0;
-        window.__mouthFrameCount++;
-        if (window.__mouthFrameCount % 100 === 0) {
-          console.log(`[GazeCore] Mouth stats: MAR=${mouthRatio.toFixed(3)}, threshold=${threshold.toFixed(3)}, calibration=`, mouthCalibration);
+        // If voice gesture is enabled, evaluate deliberate 900ms hold
+        if (voiceGestureEnabled) {
+          if (isMouthOpen) {
+            if (!mouthOpenHoldStartTime) {
+              mouthOpenHoldStartTime = ts;
+              gestureArmTriggeredThisHold = false;
+            }
+            const holdDuration = ts - mouthOpenHoldStartTime;
+
+            // Deliberate mouth-open hold of 900ms triggers voice arming
+            if (!gestureArmTriggeredThisHold && holdDuration >= GESTURE_HOLD_DURATION_MS && (ts - lastGestureArmTime) > GESTURE_COOLDOWN_MS) {
+              gestureArmTriggeredThisHold = true;
+              lastGestureArmTime = ts;
+              lastMouthClickTime = ts; // Reset click cooldown so gesture never triggers click
+              console.log(`[GazeCore] 🎙️ DELIBERATE MOUTH-OPEN GESTURE DETECTED (${holdDuration.toFixed(0)}ms)! Arming voice.`);
+              window.dispatchEvent(new CustomEvent('voice:gesture-arm', {
+                detail: { holdDuration, ts }
+              }));
+            }
+          } else {
+            // Mouth closed: if mouth click enabled and was not a voice gesture, fire click
+            if (mouthOpenHoldStartTime) {
+              const totalHold = ts - mouthOpenHoldStartTime;
+              if (!gestureArmTriggeredThisHold && mouthClickEnabled && mouthCalibration) {
+                if (totalHold >= 80 && (ts - lastMouthClickTime) > MOUTH_OPEN_COOLDOWN_MS) {
+                  lastMouthClickTime = ts;
+                  window.dispatchEvent(new CustomEvent('smile:click', {
+                    detail: { mouthRatio, ts }
+                  }));
+                  console.log(`[GazeCore] 👄 MOUTH OPEN CLICK! MAR: ${mouthRatio.toFixed(3)} > ${threshold.toFixed(3)}`);
+                }
+              }
+              mouthOpenHoldStartTime = 0;
+              gestureArmTriggeredThisHold = false;
+            }
+          }
+        } else if (mouthCalibration && mouthClickEnabled) {
+          // Standard mouth click when gesture is disabled
+          if (isMouthOpen && (ts - lastMouthClickTime) > MOUTH_OPEN_COOLDOWN_MS) {
+            lastMouthClickTime = ts;
+            window.dispatchEvent(new CustomEvent('smile:click', {
+              detail: { mouthRatio, ts }
+            }));
+            console.log(`[GazeCore] 👄 MOUTH OPEN CLICK! MAR: ${mouthRatio.toFixed(3)} > ${threshold.toFixed(3)}`);
+          }
         }
 
-        // Mouth open detected: ratio above calibrated threshold and cooldown period passed
-        if (mouthRatio > threshold && (ts - lastMouthClickTime) > MOUTH_OPEN_COOLDOWN_MS) {
-          lastMouthClickTime = ts;
-          window.dispatchEvent(new CustomEvent('smile:click', {
-            detail: { mouthRatio, ts }
-          }));
-          console.log(`[GazeCore] 👄 MOUTH OPEN CLICK! MAR: ${mouthRatio.toFixed(3)} > ${threshold.toFixed(3)}`);
+        // Helper to check deliberate head/face pose for clipboard actions
+        function isPoseActive(type) {
+          switch (type) {
+            case 'tilt_left': return rollDeg < -15;
+            case 'tilt_right': return rollDeg > 15;
+            case 'nod_up': return pitchDeg < -14;
+            case 'nod_down': return pitchDeg > 16;
+            case 'turn_left': return yawDeg < -18;
+            case 'turn_right': return yawDeg > 18;
+            default: return false;
+          }
+        }
+
+        // Deliberate gesture for Copy
+        if (copyGesture && copyGesture !== 'none') {
+          if (isPoseActive(copyGesture)) {
+            if (!copyGestureHoldStart) copyGestureHoldStart = ts;
+            const holdTime = ts - copyGestureHoldStart;
+            if (holdTime >= CLIPBOARD_GESTURE_HOLD_MS && (ts - lastCopyGestureTime) > CLIPBOARD_GESTURE_COOLDOWN_MS) {
+              lastCopyGestureTime = ts;
+              lastMouthClickTime = ts; // Suppress mouth click conflict
+              copyGestureHoldStart = 0;
+              console.log(`[GazeCore] 📋 Copy gesture fired: ${copyGesture}`);
+              window.dispatchEvent(new CustomEvent('voice:copy-gesture', { detail: { gesture: copyGesture, ts } }));
+            }
+          } else {
+            copyGestureHoldStart = 0;
+          }
+        }
+
+        // Deliberate gesture for Paste
+        if (pasteGesture && pasteGesture !== 'none') {
+          if (isPoseActive(pasteGesture)) {
+            if (!pasteGestureHoldStart) pasteGestureHoldStart = ts;
+            const holdTime = ts - pasteGestureHoldStart;
+            if (holdTime >= CLIPBOARD_GESTURE_HOLD_MS && (ts - lastPasteGestureTime) > CLIPBOARD_GESTURE_COOLDOWN_MS) {
+              lastPasteGestureTime = ts;
+              lastMouthClickTime = ts; // Suppress mouth click conflict
+              pasteGestureHoldStart = 0;
+              console.log(`[GazeCore] 📄 Paste gesture fired: ${pasteGesture}`);
+              window.dispatchEvent(new CustomEvent('voice:paste-gesture', { detail: { gesture: pasteGesture, ts } }));
+            }
+          } else {
+            pasteGestureHoldStart = 0;
+          }
         }
       }
     }
@@ -1369,6 +1465,18 @@ let headAutoCenter = { nx: 0, ny: 0, ready: false };
       mouthClickEnabled = changes.mouthClickEnabled.newValue || false;
       console.log('[GazeCore] Mouth click enabled changed to:', mouthClickEnabled);
     }
+    if (changes.voiceGestureEnabled !== undefined) {
+      voiceGestureEnabled = changes.voiceGestureEnabled.newValue || false;
+      console.log('[GazeCore] Voice gesture enabled changed to:', voiceGestureEnabled);
+    }
+    if (changes.copyGesture !== undefined) {
+      copyGesture = changes.copyGesture.newValue || 'none';
+      console.log('[GazeCore] Copy gesture changed to:', copyGesture);
+    }
+    if (changes.pasteGesture !== undefined) {
+      pasteGesture = changes.pasteGesture.newValue || 'none';
+      console.log('[GazeCore] Paste gesture changed to:', pasteGesture);
+    }
   }
 
   function handleVisibilityChange() {
@@ -1408,7 +1516,7 @@ let headAutoCenter = { nx: 0, ny: 0, ready: false };
     mouthCalibration = cal;
   });
 
-  storageGet([GAZE_ENABLED_KEY, HEAD_CAL_STORAGE_KEY, EAR_CAL_STORAGE_KEY, 'mouthCalV1', 'mouthClickEnabled', 'headCalV1', 'earCalV1']).then((store) => {
+  storageGet([GAZE_ENABLED_KEY, HEAD_CAL_STORAGE_KEY, EAR_CAL_STORAGE_KEY, 'mouthCalV1', 'mouthClickEnabled', 'voiceGestureEnabled', 'headCalV1', 'earCalV1']).then((store) => {
     if (store[HEAD_CAL_STORAGE_KEY]) {
       headCal = store[HEAD_CAL_STORAGE_KEY];
       headModeWarned = false;
@@ -1439,6 +1547,21 @@ let headAutoCenter = { nx: 0, ny: 0, ready: false };
     if (typeof store.mouthClickEnabled === 'boolean') {
       mouthClickEnabled = store.mouthClickEnabled;
       console.log('[GazeCore] Mouth click enabled:', mouthClickEnabled);
+    }
+
+    if (typeof store.voiceGestureEnabled === 'boolean') {
+      voiceGestureEnabled = store.voiceGestureEnabled;
+      console.log('[GazeCore] Voice gesture enabled:', voiceGestureEnabled);
+    }
+
+    if (store.copyGesture) {
+      copyGesture = store.copyGesture;
+      console.log('[GazeCore] Loaded copy gesture:', copyGesture);
+    }
+
+    if (store.pasteGesture) {
+      pasteGesture = store.pasteGesture;
+      console.log('[GazeCore] Loaded paste gesture:', pasteGesture);
     }
 
     if (typeof store[GAZE_ENABLED_KEY] === 'boolean') {

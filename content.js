@@ -1919,6 +1919,170 @@
       sendResponse({ status: 'ok' });
       return true;
     }
+
+    // Voice Interaction Messages
+    if (message.type === 'VOICE_STATE_CHANGED') {
+      const state = message.state;
+      if (state === 'armed') {
+        showVoiceHud('<span style="font-size:16px;">🎙️</span> <span>Listening for command... (5s)</span>', 'armed');
+      } else if (state === 'dictating') {
+        showVoiceHud('<span style="font-size:16px;">✍️</span> <span>Dictating... (Say "stop dictation" to exit)</span>', 'dictating');
+      } else if (state === 'processing-command') {
+        showVoiceHud('<span style="font-size:16px;">⚙️</span> <span>Executing command...</span>', 'normal');
+      } else if (state === 'idle') {
+        if (message.previousState === 'armed' || message.previousState === 'processing-command' || message.lastCommandResult) {
+          const msg = message.lastCommandResult?.message || message.message || 'Ready';
+          showVoiceHud(`<span style="font-size:16px;">✓</span> <span>${msg}</span>`, 'success', 2500);
+        } else if (message.previousState === 'dictating') {
+          showVoiceHud('<span>Dictation stopped</span>', 'normal', 2000);
+        } else {
+          hideVoiceHud();
+        }
+      } else if (state === 'disabled') {
+        hideVoiceHud();
+      } else if (state === 'error') {
+        showVoiceHud(`<span style="font-size:16px;">⚠️</span> <span>${message.message || 'Voice error'}</span>`, 'warning', 3500);
+      }
+    }
+
+    if (message.type === 'VOICE_INSERT_TEXT') {
+      const result = insertTextIntoActiveElement(message.text);
+      sendResponse(result);
+      return true;
+    }
+
+    if (message.type === 'VOICE_EXECUTE_DOM_ACTION') {
+      if (message.action === 'back') {
+        window.history.back();
+        showVoiceHud('<span>Navigated back</span>', 'success', 1500);
+        sendResponse({ success: true });
+        return true;
+      }
+      if (message.action === 'forward') {
+        window.history.forward();
+        showVoiceHud('<span>Navigated forward</span>', 'success', 1500);
+        sendResponse({ success: true });
+        return true;
+      }
+      if (message.action === 'copy') {
+        const info = getSelectedTextInfo();
+        if (info && info.text) {
+          navigator.clipboard.writeText(info.text).catch(() => {
+            try { document.execCommand('copy'); } catch (e) {}
+          });
+          showVoiceHud('✓ Copied selected text', 'success', 2000);
+          sendResponse({ success: true, text: info.text });
+        } else {
+          showVoiceHud('⚠️ Select text first', 'normal', 2500);
+          sendResponse({ success: false, error: 'Select text first.' });
+        }
+        return true;
+      }
+      if (message.action === 'cut_check') {
+        const info = getSelectedTextInfo();
+        if (!info || !info.text) {
+          showVoiceHud('⚠️ Select text first', 'normal', 2500);
+          sendResponse({ success: false, error: 'Select text first.' });
+          return true;
+        }
+        if (!info.isField && !info.isEditable && (!info.element || !isEditableTarget(info.element))) {
+          showVoiceHud('⚠️ Focus a text field first', 'normal', 2500);
+          sendResponse({ success: false, error: 'Focus a text field first.' });
+          return true;
+        }
+        showVoiceHud('✂️ Cut selected text? Say "confirm cut" or "cancel"', 'armed', 5000);
+        sendResponse({ success: true });
+        return true;
+      }
+      if (message.action === 'cut_execute') {
+        const info = getSelectedTextInfo();
+        if (!info || !info.text) {
+          sendResponse({ success: false, error: 'Select text first.' });
+          return true;
+        }
+        const text = info.text;
+        navigator.clipboard.writeText(text).catch(() => {});
+        if (info.isField && info.element) {
+          const el = info.element;
+          try {
+            document.execCommand('cut');
+          } catch (e) {}
+          if (el.selectionStart !== el.selectionEnd) {
+            el.value = el.value.slice(0, info.start) + el.value.slice(info.end);
+            el.selectionStart = el.selectionEnd = info.start;
+            el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+          }
+        } else {
+          try {
+            document.execCommand('cut');
+          } catch (e) {}
+        }
+        showVoiceHud('✓ Cut selected text', 'success', 2000);
+        sendResponse({ success: true, text });
+        return true;
+      }
+      if (message.action === 'paste') {
+        const el = getActiveEditableElement();
+        if (!el) {
+          showVoiceHud('⚠️ Focus a text field first', 'normal', 2500);
+          sendResponse({ success: false, error: 'Focus a text field first.' });
+          return true;
+        }
+
+        const readPromise = navigator.clipboard && navigator.clipboard.readText
+          ? navigator.clipboard.readText().catch(() => null)
+          : Promise.resolve(null);
+
+        readPromise.then(clipText => {
+          const textToInsert = clipText || message.fallbackText;
+          if (textToInsert) {
+            const res = insertTextIntoActiveElement(textToInsert);
+            if (res.focused) {
+              showVoiceHud('✓ Pasted text', 'success', 2000);
+              sendResponse({ success: true });
+            } else {
+              showVoiceHud('⚠️ Focus a text field first', 'normal', 2500);
+              sendResponse({ success: false, error: 'Focus a text field first.' });
+            }
+          } else {
+            showVoiceHud('⚠️ Clipboard is empty', 'normal', 2000);
+            sendResponse({ success: false, error: 'Clipboard is empty.' });
+          }
+        });
+        return true;
+      }
+      if (message.action === 'select_all') {
+        const el = getActiveEditableElement();
+        if (el && (el.tagName.toLowerCase() === 'textarea' || el.tagName.toLowerCase() === 'input')) {
+          el.focus();
+          el.select();
+        } else if (el && el.isContentEditable) {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        } else {
+          document.execCommand('selectAll', false, null);
+        }
+        showVoiceHud('✓ Selected all text', 'success', 2000);
+        sendResponse({ success: true });
+        return true;
+      }
+      if (message.action === 'undo') {
+        document.execCommand('undo');
+        showVoiceHud('↩️ Undo', 'normal', 1500);
+        sendResponse({ success: true });
+        return true;
+      }
+      if (message.action === 'redo') {
+        document.execCommand('redo');
+        showVoiceHud('↪️ Redo', 'normal', 1500);
+        sendResponse({ success: true });
+        return true;
+      }
+    }
   });
 
   // Listen for gaze:status events and relay to sidepanel
@@ -1932,6 +2096,279 @@
         // Ignore errors if sidepanel not open
       });
     }
+  });
+
+  // ========================================
+  // VOICE TYPING & HUD SUBSYSTEM
+  // ========================================
+
+  let lastFocusedEditableElement = null;
+  let voiceHudElement = null;
+  let voiceHudTimeout = null;
+
+  function isEditableTarget(el) {
+    if (!el || !(el instanceof HTMLElement)) return false;
+    if (el.isContentEditable) return true;
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'textarea') return true;
+    if (tag === 'input') {
+      const type = (el.getAttribute('type') || 'text').toLowerCase();
+      return ['text', 'search', 'email', 'url', 'tel', 'password', 'number'].includes(type);
+    }
+    return false;
+  }
+
+  // Track editable element focus across page
+  document.addEventListener('focusin', (e) => {
+    if (isEditableTarget(e.target)) {
+      lastFocusedEditableElement = e.target;
+    }
+  }, true);
+
+  document.addEventListener('click', (e) => {
+    if (isEditableTarget(e.target)) {
+      lastFocusedEditableElement = e.target;
+    }
+  }, true);
+
+  function getActiveEditableElement() {
+    if (document.activeElement && isEditableTarget(document.activeElement)) {
+      return document.activeElement;
+    }
+    if (lastFocusedEditableElement && document.contains(lastFocusedEditableElement)) {
+      return lastFocusedEditableElement;
+    }
+    return null;
+  }
+
+  function getSelectedTextInfo() {
+    const el = getActiveEditableElement();
+    if (el && el.tagName && (el.tagName.toLowerCase() === 'textarea' || el.tagName.toLowerCase() === 'input')) {
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      if (typeof start === 'number' && typeof end === 'number' && start !== end) {
+        return {
+          text: el.value.slice(Math.min(start, end), Math.max(start, end)),
+          element: el,
+          isField: true,
+          start: Math.min(start, end),
+          end: Math.max(start, end)
+        };
+      }
+    }
+
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+      const text = sel.toString();
+      if (text) {
+        const isEditable = el && isEditableTarget(el) ? true : (sel.anchorNode && sel.anchorNode.parentElement && isEditableTarget(sel.anchorNode.parentElement));
+        return {
+          text,
+          element: el || (sel.anchorNode ? sel.anchorNode.parentElement : null),
+          isField: false,
+          isEditable,
+          range: sel.getRangeAt(0)
+        };
+      }
+    }
+
+    return { text: '', element: el, isField: false, isEditable: false };
+  }
+
+  function getOrCreateVoiceHud() {
+    if (voiceHudElement && document.contains(voiceHudElement)) {
+      return voiceHudElement;
+    }
+
+    voiceHudElement = document.createElement('div');
+    voiceHudElement.id = 'sanchalan-voice-hud';
+    voiceHudElement.style.cssText = `
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 2147483645;
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 18px;
+      background: rgba(28, 28, 30, 0.94);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 30px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.28);
+      pointer-events: none;
+      transition: opacity 0.22s ease, transform 0.22s ease;
+      opacity: 0;
+      transform: translateY(12px);
+    `;
+
+    document.documentElement.appendChild(voiceHudElement);
+    return voiceHudElement;
+  }
+
+  function showVoiceHud(htmlContent, type = 'normal', autoDismissMs = 0) {
+    const hud = getOrCreateVoiceHud();
+    clearTimeout(voiceHudTimeout);
+
+    hud.innerHTML = htmlContent;
+    hud.style.display = 'flex';
+
+    if (type === 'armed') {
+      hud.style.borderColor = 'rgba(230, 162, 60, 0.7)';
+      hud.style.boxShadow = '0 0 18px rgba(230, 162, 60, 0.4)';
+    } else if (type === 'dictating') {
+      hud.style.borderColor = 'rgba(103, 194, 58, 0.7)';
+      hud.style.boxShadow = '0 0 18px rgba(103, 194, 58, 0.4)';
+    } else if (type === 'success') {
+      hud.style.borderColor = 'rgba(103, 194, 58, 0.5)';
+      hud.style.boxShadow = '0 4px 14px rgba(0, 0, 0, 0.25)';
+    } else {
+      hud.style.borderColor = 'rgba(255, 255, 255, 0.16)';
+      hud.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.28)';
+    }
+
+    requestAnimationFrame(() => {
+      hud.style.opacity = '1';
+      hud.style.transform = 'translateY(0)';
+    });
+
+    if (autoDismissMs > 0) {
+      voiceHudTimeout = setTimeout(() => {
+        hideVoiceHud();
+      }, autoDismissMs);
+    }
+  }
+
+  function hideVoiceHud() {
+    if (!voiceHudElement) return;
+    voiceHudElement.style.opacity = '0';
+    voiceHudElement.style.transform = 'translateY(12px)';
+    clearTimeout(voiceHudTimeout);
+    voiceHudTimeout = setTimeout(() => {
+      if (voiceHudElement) {
+        voiceHudElement.style.display = 'none';
+      }
+    }, 240);
+  }
+
+  function insertTextIntoActiveElement(text) {
+    const el = getActiveEditableElement();
+    if (!el) {
+      showVoiceHud('ℹ️ No editable field focused. Transcript saved to side panel.', 'normal', 3000);
+      return { success: false, focused: false };
+    }
+
+    el.focus();
+
+    if (el.tagName && (el.tagName.toLowerCase() === 'textarea' || el.tagName.toLowerCase() === 'input')) {
+      const start = el.selectionStart ?? el.value.length;
+      const end = el.selectionEnd ?? el.value.length;
+      const textToInsert = (start > 0 && !/\s$/.test(el.value.slice(0, start)) && !/^[.,!?:;\n]/.test(text)) ? ' ' + text : text;
+
+      let inserted = false;
+      try {
+        inserted = document.execCommand('insertText', false, textToInsert);
+      } catch (e) {
+        inserted = false;
+      }
+
+      if (!inserted) {
+        const val = el.value;
+        el.value = val.slice(0, start) + textToInsert + val.slice(end);
+        el.selectionStart = el.selectionEnd = start + textToInsert.length;
+      }
+
+      el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+      return { success: true, focused: true };
+    }
+
+    if (el.isContentEditable) {
+      const textToInsert = text;
+      let inserted = false;
+      try {
+        inserted = document.execCommand('insertText', false, textToInsert);
+      } catch (e) {
+        inserted = false;
+      }
+
+      if (!inserted) {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          range.deleteContents();
+          const node = document.createTextNode(textToInsert);
+          range.insertNode(node);
+          range.setStartAfter(node);
+          range.setEndAfter(node);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        } else {
+          el.appendChild(document.createTextNode(textToInsert));
+        }
+      }
+
+      el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+      return { success: true, focused: true };
+    }
+
+    return { success: false, focused: false };
+  }
+
+  // Listen for voice gesture trigger from gaze subsystem
+  window.addEventListener('voice:gesture-arm', () => {
+    chrome.runtime.sendMessage({ type: 'VOICE_GESTURE_TRIGGER' }).catch(() => {});
+  });
+
+  // Listen for gesture-based copy
+  window.addEventListener('voice:copy-gesture', () => {
+    const info = getSelectedTextInfo();
+    if (info && info.text) {
+      navigator.clipboard.writeText(info.text).catch(() => {
+        try { document.execCommand('copy'); } catch (e) {}
+      });
+      chrome.runtime.sendMessage({
+        type: 'VOICE_GESTURE_COPY_SYNC',
+        text: info.text
+      }).catch(() => {});
+      showVoiceHud('✓ Gesture: Copied selection', 'success', 2000);
+    } else {
+      showVoiceHud('⚠️ Gesture: Select text first', 'normal', 2000);
+    }
+  });
+
+  // Listen for gesture-based paste
+  window.addEventListener('voice:paste-gesture', () => {
+    const el = getActiveEditableElement();
+    if (!el) {
+      showVoiceHud('⚠️ Gesture: Focus a text field first', 'normal', 2500);
+      return;
+    }
+
+    const readPromise = navigator.clipboard && navigator.clipboard.readText
+      ? navigator.clipboard.readText().catch(() => null)
+      : Promise.resolve(null);
+
+    readPromise.then(clipText => {
+      if (clipText) {
+        insertTextIntoActiveElement(clipText);
+        showVoiceHud('✓ Gesture: Pasted text', 'success', 2000);
+      } else {
+        chrome.runtime.sendMessage({ type: 'VOICE_GET_CLIPBOARD_FALLBACK' }, (res) => {
+          if (res && res.text) {
+            insertTextIntoActiveElement(res.text);
+            showVoiceHud('✓ Gesture: Pasted text', 'success', 2000);
+          } else {
+            showVoiceHud('⚠️ Gesture: Clipboard is empty', 'normal', 2000);
+          }
+        });
+      }
+    });
   });
   
   // Get initial display mode and gaze enabled status

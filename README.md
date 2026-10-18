@@ -8,7 +8,7 @@ SANCHALAN makes the web accessible to everyone by combining computer vision-base
 
 ---
 
-## 🏆 Built for Chrome Built-in AI Hackathon
+## 🏆 Built for Hacktoberfest HackDay Bengaluru 2026
 
 SANCHALAN showcases the power of **Chrome's Built-in AI APIs** by bringing sophisticated, privacy-first accessibility directly into the browser. This project demonstrates real-world application of on-device AI to solve critical accessibility challenges.
 
@@ -98,6 +98,50 @@ Meanwhile, browsing the web means clicking countless links just to preview conte
 - Tilt up/down → cursor moves vertically
 - Uses One-Euro filter for smooth, jitter-free movement
 - Personalized calibration adapts to your natural range
+
+### 2. 🎙️ Privacy-Aware Voice Interaction & Deterministic Commands
+
+**Voice Typing & Dictation:**
+- Transcribes speech and injects final text directly at the cursor of the active text field.
+- Deterministic spoken punctuation formatting ("period", "comma", "question mark", "new line", "new paragraph").
+- **Tolerant Stop Detection:** "Stop dictation", "stop typing", "end dictation", "finish dictation", and "stop voice typing" stop dictation immediately even when the wake word is omitted. Ordinary speech containing the word "stop" does not trigger accidental stops.
+- Safe fallback: If no text field is focused, displays an in-page HUD and preserves the transcript safely in the side panel with one-click copy.
+- Never injects interim transcripts into page content.
+
+**Deterministic Voice Commands:**
+- Hands-free browser navigation with strict allowlist matching (no LLM decision-making for privileged actions).
+- Dual Arming: Say the wake phrase ("sanchalan" and phonetic ASR variants like "sanchaalan", "sun chalan") or hold mouth open for 900ms (face gesture).
+- Short rolling transcript window handles split recognition events (e.g. "sanchalan" followed by "stop dictation" or a command).
+- 5-second listening window with in-page HUD and side-panel countdown indicator.
+- Supported commands:
+  - **Navigation:**
+    - `next tab` / `previous tab`
+    - `switch to tab <number>` (e.g. "switch to tab 2", "switch to tab two")
+    - `switch to tab <title>` (e.g. "switch to tab github", "switch to tab chat", "switch to tab new york times") — uses 6-tier ranked matching in the current window.
+    - `choose <1-5>` (e.g. "sanchalan choose 1", "choose 2") to select numbered candidates when multiple tabs match.
+    - `close current tab` (requires explicit "confirm close" confirmation)
+    - `new tab` / `reload tab`
+    - `go back` / `go forward`
+  - **Editing & Clipboard:**
+    - `copy` / `copy selected text`
+    - `cut` / `cut selected text` (requires confirmation: "confirm cut" to prevent accidental data loss)
+    - `paste` / `paste text` (uses `navigator.clipboard` with an extension-local clipboard fallback in session memory)
+    - `select all`
+    - `undo` / `redo`
+  - **YouTube:**
+    - `open youtube` / `open youtube dot com`
+    - `search in youtube <query>` / `search youtube for <query>` (navigates active or existing YouTube tab, or opens a new tab with encoded query)
+  - **Dictation & Control:**
+    - `start dictation` / `stop dictation`
+    - `stop listening` / `cancel`
+
+**Deliberate Facial & Head Gestures (Optional):**
+- Configurable in side-panel settings:
+  - Sustained mouth-open hold (900ms) → arm voice commands.
+  - Optional deliberate head pose (tilt left, nod up, turn left) → copy selected text.
+  - Optional deliberate head pose (tilt right, nod down, turn right) → paste text.
+- Cooldowns and click suppression ensure gestures never trigger unwanted mouth clicks.
+
 
 **Mouth-Open Clicking:**
 - Open mouth → triggers click
@@ -450,6 +494,64 @@ Check browser console for:
 
 ---
 
+## 🎙️ Voice Interaction Subsystem Architecture (Stage 1)
+
+### Architecture & Data Flow
+In Manifest V3 (MV3), service workers do not have DOM or audio capture access. SANCHALAN uses a secure, decoupled MV3 architecture:
+
+```
+[Microphone Hardware]
+        │
+        ▼ getUserMedia({ audio: true })
+[Offscreen Document: voice/offscreen.html & offscreen.js]
+        │ (Owns Audio Stream & SpeechRecognition Engine)
+        │
+        ├── VOICE_INTERIM_TRANSCRIPT (preview only) ──► [Side Panel]
+        └── VOICE_FINAL_TRANSCRIPT ───────────────────► [Background Service Worker]
+                                                                │
+                                            (Single Source of Truth: State Machine)
+                                            ['disabled'|'idle'|'armed'|'dictating'|'processing-command'|'error']
+                                                                │
+                                ┌───────────────────────────────┴───────────────────────────────┐
+                                ▼                                                               ▼
+                     [Deterministic Command Parser]                                    [Active Tab: content.js]
+                      (Next/Prev/Switch/Close/Dictate)                                  - Caret Text Insertion
+                                                                                        - DOM Events ('input', 'change')
+                                                                                        - Floating HUD Indicator
+                                                                                        - Fallback toast + side-panel copy
+```
+
+### Privacy & Security Boundaries
+- **No Client-Side API Keys:** Client-side extension storage, manifest files, and repository source code must never contain API keys.
+- **Audio Privacy:** Audio capture occurs exclusively inside the local offscreen document. No raw audio data is dispatched to external servers in Stage 1.
+- **Deterministic Command Execution:** Privileged browser actions (tab switching, closing, reload, navigation) are strictly parsed through an allowlist parser (`voice/command-parser.js`). An LLM is never used to decide privileged browser actions.
+
+### STT Provider Interfaces & Tradeoffs
+1. **`WebSpeechProvider` (Stage 1 Working Provider):**
+   - *Status:* Active for local development, testing, and live demonstrations.
+   - *Tradeoffs:* Uses browser-provided `SpeechRecognition`. Zero setup required, but depends on browser/OS platform capabilities and does not guarantee offline processing.
+2. **`SarvamProvider` (Stage 2 Placeholder):**
+   - *Status:* Clean interface & settings placeholder; disabled until configured.
+   - *Architecture:* Must communicate through a secure backend proxy URL. Direct client-side API keys are strictly forbidden.
+   - *Note:* Sarvam AI is a proprietary cloud/edge speech recognition service optimized for Indian languages; it is not claimed to be fully local or open source.
+3. **`LocalWhisperProvider` (Stage 2 Placeholder):**
+   - *Status:* Clean interface & settings placeholder; disabled until configured.
+   - *Architecture:* Calls a configurable localhost companion service (e.g., `http://localhost:8080/v1/transcribe` via `whisper.cpp` or `faster-whisper`).
+   - *Advantage:* Complete on-device privacy and offline capability without bundling multi-gigabyte models into the Chrome extension bundle.
+
+### Permissions Rationale
+- `"offscreen"`: Required by Chrome Manifest V3 to host an offscreen document with `chrome.offscreen.Reason.USER_MEDIA` for microphone capture and speech recognition.
+- `"clipboardRead"`: Required to support the hands-free voice command `"paste"`, allowing clipboard contents to be inserted into the active text element without blocking prompts.
+- `"clipboardWrite"`: Required to support the voice command `"copy selected text"`, placing the active selection onto the system clipboard.
+- *Host Permissions:* No additional host permissions were added beyond existing requirements.
+
+### Known Limitations & Security Boundaries
+- **Chrome Internal Pages:** Browser security policies prevent extensions from injecting content scripts or executing DOM actions (such as copy, cut, paste, typing, or history navigation) on `chrome://`, `chrome-extension://`, `edge://`, `about:`, or `devtools://` pages. On these system pages, SANCHALAN returns a graceful status message advising the user to focus a standard web page.
+- **System Clipboard Permissions:** When pasting text in web pages, modern browsers require explicit user gesture activation or clipboard permissions. SANCHALAN automatically falls back to its extension-local session clipboard memory (`chrome.storage.session`) if `navigator.clipboard.readText()` is denied or unavailable.
+
+
+---
+
 ## 🙏 Acknowledgments
 
 Built with amazing open-source tools:
@@ -483,7 +585,7 @@ Built for the Chrome Built-in AI Hackathon! Contributions welcome:
 
 <div align="center">
 
-**Made with ❤️ for the Chrome Built-in AI Hackathon**
+**Made with ❤️ for Hacktoberfest Hackday Bengaluru**
 
 *Empowering digital independence through on-device AI*
 
