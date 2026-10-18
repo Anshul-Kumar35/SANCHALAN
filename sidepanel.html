@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <link rel="stylesheet" href="sidepanel.css?v=2">
+</head>
+<body>
+  <div id="container">
+    <!-- Header with Branding -->
+    <div id="nutshell-header">
+      <img src="icons/icon-48.png" alt="SANCHALAN" class="nutshell-logo">
+      <h2 class="nutshell-title">SANCHALAN</h2>
+    </div>
+
+    <!-- Head Tracking Section (Main Feature First!) -->
+    <div id="gaze-section">
+      <h3>🎯 Head Tracking (Hands-Free)</h3>
+
+      <div class="setting-group">
+        <label class="toggle-container">
+          <input type="checkbox" id="gaze-enabled" checked>
+          <span class="toggle-slider"></span>
+          <span class="toggle-label">Enable Head Tracking</span>
+        </label>
+        <p class="help-text">Requires camera access for head movement detection</p>
+      </div>
+
+      <div class="status-indicator">
+        <span class="status-dot" id="gaze-status-dot"></span>
+        <span id="gaze-status-text">Disabled</span>
+      </div>
+
+      <button id="calibrate-btn" class="btn secondary">
+        Calibrate Head Position
+      </button>
+
+      <div class="setting-group">
+        <label class="setting-label" for="dwell-time">
+          Dwell Time: <span id="dwell-value">600</span>ms
+        </label>
+        <input type="range" id="dwell-time" min="300" max="1200" step="50" value="600" class="slider">
+        <p class="help-text">Time to hover before clicking a link</p>
+      </div>
+
+      <details class="keyboard-shortcuts">
+        <summary>Keyboard Shortcuts</summary>
+        <ul>
+          <li><kbd>Alt+H</kbd> - Calibrate head tracking</li>
+          <li><kbd>Alt+M</kbd> - Calibrate mouth click</li>
+          <li><kbd>Alt+P</kbd> - Toggle pointer visibility</li>
+          <li><kbd>Alt+V</kbd> - Toggle camera preview</li>
+          <li><kbd>Shift+H</kbd> - Toggle debug HUD</li>
+        </ul>
+      </details>
+    </div>
+
+    <hr>
+
+    <!-- Mouth Click Section -->
+    <div id="mouth-click-section">
+      <h3>👄 Mouth Click (Optional)</h3>
+
+      <div class="setting-group">
+        <label class="toggle-container">
+          <input type="checkbox" id="mouth-click-enabled">
+          <span class="toggle-slider"></span>
+          <span class="toggle-label">Enable Mouth Click</span>
+        </label>
+        <p class="help-text">Open your mouth wide to trigger clicks</p>
+      </div>
+
+      <div class="status-indicator">
+        <span class="status-dot" id="mouth-status-dot"></span>
+        <span id="mouth-status-text">Not calibrated</span>
+      </div>
+
+      <button id="calibrate-mouth-btn" class="btn secondary">
+        Calibrate Mouth Click
+      </button>
+    </div>
+
+    <hr>
+
+    <!-- Settings Section -->
+    <div id="settings-section">
+      <h3>🤖 AI Summarization</h3>
+      
+      <!-- Display Mode Selection -->
+      <div class="setting-group">
+        <label class="setting-label" for="display-mode">Display Location:</label>
+        <select id="display-mode" class="setting-select">
+          <option value="panel">Side Panel Only</option>
+          <option value="tooltip" selected>Tooltip Only</option>
+        </select>
+      </div>
+      
+      <div class="radio-group">
+        <label>
+          <input type="radio" name="api-choice" value="summarization" id="radio-summarization" checked>
+          <span>Summarization API</span>
+        </label>
+        <label>
+          <input type="radio" name="api-choice" value="prompt" id="radio-prompt">
+          <span>Prompt API (Custom)</span>
+        </label>
+      </div>
+      
+      <div id="prompt-container" class="hidden">
+        <label for="custom-prompt">Custom Prompt:</label>
+        <textarea id="custom-prompt" rows="3" placeholder="Enter your summarization prompt...">Summarize this article in 2-3 sentences</textarea>
+      </div>
+    </div>
+
+    <hr>
+    
+    <!-- Loading States -->
+    <div id="loading-extract" class="hidden">
+      <div class="spinner"></div>
+      <p>Extracting content...</p>
+    </div>
+    
+    <div id="loading-summarize" class="hidden">
+      <div class="spinner"></div>
+      <p>Generating summary...</p>
+    </div>
+    
+    <!-- Content Area -->
+    <div id="content-area" class="hidden">
+      <h1 id="title"></h1>
+      
+      <div id="summary-section">
+        <h2>AI Summary</h2>
+        <div id="ai-summary"></div>
+      </div>
+      
+      <button id="toggle-full-content" class="toggle-btn">View Full Content</button>
+      
+      <div id="full-content-section" class="hidden">
+        <h2>Full Content</h2>
+        <div id="article-content"></div>
+      </div>
+    </div>
+    
+    <!-- Error State -->
+    <div id="error" class="hidden">
+      <p id="error-message"></p>
+      <div id="fallback-content" class="hidden">
+        <h2>Full Content (Fallback)</h2>
+        <h1 id="fallback-title"></h1>
+        <div id="fallback-article"></div>
+      </div>
+    </div>
+    
+    <!-- Model Download State -->
+    <div id="model-download" class="card centered" hidden>
+      <div class="icon">🤖</div>
+      <h3 id="model-download-title">AI Model Required</h3>
+      <p id="model-download-message">The Prompt API model needs to be downloaded (2GB, one-time only)</p>
+      <button id="download-model-btn" class="btn primary">
+        Download Prompt API Model
+      </button>
+      <div class="download-progress" hidden>
+        <div class="progress-bar">
+          <div class="progress-fill"></div>
+        </div>
+        <p class="progress-text">Preparing download...</p>
+      </div>
+    </div>
+    
+    <!-- Welcome State -->
+    <div id="welcome">
+      <p>Enable head tracking above for hands-free browsing, or simply hover over any link to preview and get an AI summary with SANCHALAN!</p>
+    </div>
+  </div>
+  
+  <script src="sidepanel.js?v=2"></script>
+</body>
+</html>
